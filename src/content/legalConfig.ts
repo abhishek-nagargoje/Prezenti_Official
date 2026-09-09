@@ -12,24 +12,24 @@
 import { SEO_CONSTANTS } from '../seo/constants';
 
 export const legalConfig = {
-  companyName: 'Prezenti Business Services Pvt. Ltd.',
+  companyName: 'PREZENTI BUSINESS SERVICES PRIVATE LIMITED',
   brandName: SEO_CONSTANTS.SITE_NAME,
   website: SEO_CONSTANTS.BASE_URL,
 
-  legalEmail: SEO_CONSTANTS.CONTACT_EMAIL,
-  privacyEmail: SEO_CONSTANTS.CONTACT_EMAIL,
-  supportEmail: SEO_CONSTANTS.CONTACT_EMAIL,
-  phone: SEO_CONSTANTS.PHONE,
+  legalEmail: 'support@prezenti.com',
+  privacyEmail: 'support@prezenti.com',
+  supportEmail: 'support@prezenti.com',
+  phone: '+91 8788726752',
   whatsapp: SEO_CONSTANTS.WHATSAPP,
 
   city: SEO_CONSTANTS.CITY,
   state: SEO_CONSTANTS.STATE,
   country: 'India',
-  registeredAddress: `${SEO_CONSTANTS.ADDRESS.STREET_ADDRESS}, ${SEO_CONSTANTS.CITY}, ${SEO_CONSTANTS.STATE} ${SEO_CONSTANTS.ADDRESS.POSTAL_CODE}, India`,
+  registeredAddress: '3rd Floor, 116/3/1/4, Unity Constructions, Baner Road, Baner, Pune, Maharashtra 411045, India',
 
-  effectiveDate: '12 August 2026',
-  lastUpdated: '25 August 2026',
-  version: '1.1',
+  effectiveDate: '9 September 2026',
+  lastUpdated: '9 September 2026',
+  version: '2.0',
 
   businessModel: {
     customerType:
