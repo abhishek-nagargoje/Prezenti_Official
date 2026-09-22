@@ -191,6 +191,67 @@ describe('initiateIciciPayment', () => {
     expect(repository.recordInitiateSaleOutcome).toHaveBeenCalledWith(expect.objectContaining({ status: 'UNKNOWN' }));
   });
 
+  describe('forensic diagnostic object (R1000-but-rejected investigation)', () => {
+    it('reports a redirect host mismatch precisely, with a hostname-only reason, never the full URL', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = acceptedJsonFetch({ redirectURI: 'https://evil.example.com/steal-card-details?token=abc' });
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.diagnostic?.validationInitiationAccepted).toBe(true);
+      expect(result.diagnostic?.redirectURIPresent).toBe(true);
+      expect(result.diagnostic?.redirectHost).toBe('evil.example.com');
+      expect(result.diagnostic?.redirectValidationFailureReason).toContain('evil.example.com');
+      expect(result.diagnostic?.redirectValidationFailureReason).not.toContain('token=abc');
+      expect(result.diagnostic?.redirectValidationFailureReason).not.toContain('steal-card-details');
+    });
+
+    it('reports which specific field failed validation when ICICI echoes back a mismatched merchantId', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = jsonFetch(200, {
+        responseCode: 'R1000',
+        merchantId: 'some-other-merchant-id',
+        aggregatorID: CONFIG.aggregatorId,
+        redirectURI: 'https://pgpayuat.icicibank.com/somepage',
+        tranCtx: 'ctx',
+      });
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.diagnostic?.validationInitiationAccepted).toBe(false);
+      expect(result.diagnostic?.merchantIdMatched).toBe(false);
+      expect(result.diagnostic?.aggregatorIdMatched).toBe(true);
+      expect(result.diagnostic?.validationErrors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'merchantId' })]),
+      );
+    });
+
+    it('never appears in the browser-facing safeResult, on any outcome', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = acceptedJsonFetch({ redirectURI: 'https://evil.example.com/page' });
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult).not.toHaveProperty('diagnostic');
+      expect(JSON.stringify(result.safeResult)).not.toContain('evil.example.com');
+    });
+
+    it('reports validationInitiationAccepted:true and both fields present on a genuine acceptance', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = acceptedJsonFetch();
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.diagnostic?.validationInitiationAccepted).toBe(true);
+      expect(result.diagnostic?.merchantIdMatched).toBe(true);
+      expect(result.diagnostic?.aggregatorIdMatched).toBe(true);
+      expect(result.diagnostic?.merchantTxnNoMatched).toBe(true);
+      expect(result.diagnostic?.redirectURIPresent).toBe(true);
+      expect(result.diagnostic?.tranCtxPresent).toBe(true);
+      expect(result.diagnostic?.redirectHost).toBe('pgpayuat.icicibank.com');
+    });
+  });
+
   it('builds a redacted preview that never contains the hash key', async () => {
     const repository = createFakeRepository();
     const fetchImpl = acceptedJsonFetch();

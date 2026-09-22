@@ -66,6 +66,26 @@ export interface IciciInitiateSaleServiceResult {
    */
   rawResponseDescription?: string;
   /**
+   * TEMPORARY forensic diagnostics for the "R1000 but success:false"
+   * investigation — safe to log (booleans, field names, generic reason
+   * strings, and a redirect HOSTNAME only, never a full URL/query string,
+   * never the secureHash, never any credential). Remove once the root
+   * cause is confirmed and fixed.
+   */
+  diagnostic?: {
+    validationInitiationAccepted: boolean;
+    validationErrors: Array<{ field: string; reason: string }>;
+    merchantIdMatched: boolean;
+    aggregatorIdMatched: boolean;
+    merchantTxnNoMatched: boolean;
+    redirectURIPresent: boolean;
+    tranCtxPresent: boolean;
+    /** Hostname only — never the full redirectURI, never its query string. */
+    redirectHost?: string;
+    /** Safe, hostname-only description of why buildIciciRedirectUrl rejected the response, if it did. */
+    redirectValidationFailureReason?: string;
+  };
+  /**
    * Set only when `safeResult.success` is false, to let the route choose
    * an accurate HTTP status without re-deriving it: `PERSISTENCE` means
    * Prezenti's own database couldn't be written to (maps to 503, same
@@ -223,6 +243,27 @@ export async function initiateIciciPayment(
     (typeof httpResult.body.responseDescription === 'string' ? httpResult.body.responseDescription : undefined) ??
     (typeof httpResult.body.respDescription === 'string' ? httpResult.body.respDescription : undefined);
 
+  // TEMPORARY forensic diagnostics — see IciciInitiateSaleServiceResult.diagnostic doc comment.
+  function safeHostnameOf(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    try {
+      return new URL(value).hostname;
+    } catch {
+      return '(malformed URL)';
+    }
+  }
+
+  const diagnostic = {
+    validationInitiationAccepted: validation.initiationAccepted,
+    validationErrors: validation.errors,
+    merchantIdMatched: !validation.errors.some((e) => e.field === 'merchantId'),
+    aggregatorIdMatched: !validation.errors.some((e) => e.field === 'aggregatorID'),
+    merchantTxnNoMatched: !validation.errors.some((e) => e.field === 'merchantTxnNo'),
+    redirectURIPresent: Boolean(validation.redirectURI),
+    tranCtxPresent: Boolean(validation.tranCtx),
+    redirectHost: safeHostnameOf(validation.redirectURI),
+  };
+
   if (!validation.initiationAccepted) {
     await recordOutcomeSafely(deps, {
       merchantTxnNo,
@@ -241,6 +282,7 @@ export async function initiateIciciPayment(
       httpStatus: httpResult.httpStatus,
       rawResponseCode,
       rawResponseDescription,
+      diagnostic,
     };
   }
 
@@ -253,6 +295,12 @@ export async function initiateIciciPayment(
     safeRedirectUrl = buildIciciRedirectUrl(validation.redirectURI!, validation.tranCtx!, deps.config.environment);
   } catch (error) {
     const reason = error instanceof IciciUnsafeRedirectError ? error.message : 'unknown redirect validation error';
+    // Safe, hostname-only diagnostic reason for the log — deliberately NOT
+    // `reason` itself, which can embed the raw redirectURI (and its query
+    // string) when the URL was malformed.
+    const safeReason = diagnostic.redirectHost
+      ? `redirect host "${diagnostic.redirectHost}" not in the allowed list for environment "${deps.config.environment}"`
+      : 'redirectURI was malformed or unparsable';
     await recordOutcomeSafely(deps, {
       merchantTxnNo,
       status: 'UNKNOWN',
@@ -270,6 +318,7 @@ export async function initiateIciciPayment(
       httpStatus: httpResult.httpStatus,
       rawResponseCode,
       rawResponseDescription,
+      diagnostic: { ...diagnostic, redirectValidationFailureReason: safeReason },
     };
   }
 
@@ -298,5 +347,6 @@ export async function initiateIciciPayment(
     httpStatus: httpResult.httpStatus,
     rawResponseCode,
     rawResponseDescription,
+    diagnostic,
   };
 }
