@@ -83,4 +83,58 @@ describe('getIciciConfig', () => {
       expect((error as Error).message).not.toContain('super-secret-value-must-not-leak');
     }
   });
+
+  describe('application deployment environment vs. ICICI gateway environment are independent', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousVercelEnv = process.env.VERCEL_ENV;
+
+    afterEach(() => {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = previousVercelEnv;
+    });
+
+    function setValidUatCredentials() {
+      process.env.ICICI_MERCHANT_ID = 'test-merchant';
+      process.env.ICICI_AGGREGATOR_ID = 'test-aggregator';
+      process.env.ICICI_HASH_KEY = 'test-key';
+      process.env.ICICI_RETURN_URL = 'https://example.test/return';
+    }
+
+    it('production website deployment + ICICI_ENV=uat => allowed (NODE_ENV/VERCEL_ENV=production alone never selects ICICI production)', () => {
+      clearIciciEnv();
+      process.env.NODE_ENV = 'production';
+      process.env.VERCEL_ENV = 'production';
+      setValidUatCredentials();
+      // ICICI_ENV intentionally left unset — must still default to uat.
+
+      const config = getIciciConfig();
+      expect(config.environment).toBe('uat');
+      expect(config.initiateSaleUrl).toBe('https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale');
+    });
+
+    it('production website deployment + ICICI_ENV=production => rejected (the app being in production never implicitly authorizes the ICICI production gateway)', () => {
+      clearIciciEnv();
+      process.env.NODE_ENV = 'production';
+      process.env.VERCEL_ENV = 'production';
+      process.env.ICICI_ENV = 'production';
+      setValidUatCredentials();
+
+      expect(() => getIciciConfig()).toThrow(IciciConfigError);
+    });
+
+    it('getIciciConfig never reads NODE_ENV or VERCEL_ENV to decide the ICICI environment — only ICICI_ENV', () => {
+      clearIciciEnv();
+      process.env.NODE_ENV = 'development';
+      process.env.VERCEL_ENV = 'development';
+      setValidUatCredentials();
+
+      // Even with a non-production app environment, explicit ICICI_ENV=uat
+      // is honored exactly the same way — the two are fully decoupled in
+      // both directions.
+      process.env.ICICI_ENV = 'uat';
+      expect(getIciciConfig().environment).toBe('uat');
+    });
+  });
 });

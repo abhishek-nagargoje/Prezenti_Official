@@ -125,7 +125,7 @@ describe('POST /api/payments/icici/initiate', () => {
     expect((state.jsonBody as { success: boolean }).success).toBe(false);
   });
 
-  it('returns a safe 500 (no internal details leaked) on a malformed/unexpected provider response', async () => {
+  it('returns a safe 500 (no internal details leaked) on a truly unexpected/uncaught error', async () => {
     mockInitiateIciciPayment.mockRejectedValueOnce(new Error('Unexpected token < in JSON at position 0'));
 
     const { response, state } = createResponse();
@@ -133,6 +133,34 @@ describe('POST /api/payments/icici/initiate', () => {
 
     expect(state.statusCode).toBe(500);
     expect(JSON.stringify(state.jsonBody)).not.toContain('JSON at position');
+  });
+
+  it('returns 503 (not 500) when the failure is our own persistence layer (errorKind PERSISTENCE)', async () => {
+    mockInitiateIciciPayment.mockResolvedValueOnce({
+      safeResult: { success: false, message: 'Unable to start your payment right now. Please try again.' },
+      preview: {},
+      errorKind: 'PERSISTENCE',
+    });
+
+    const { response, state } = createResponse();
+    await handler({ method: 'POST', headers: {}, body: VALID_BODY }, response as never);
+
+    expect(state.statusCode).toBe(503);
+    expect((state.jsonBody as { success: boolean }).success).toBe(false);
+  });
+
+  it('returns 502 (not 500) when ICICI itself is unreachable at the network level (errorKind GATEWAY_UNREACHABLE)', async () => {
+    mockInitiateIciciPayment.mockResolvedValueOnce({
+      safeResult: { success: false, merchantTxnNo: 'PZ123ABC', message: 'Unable to reach the payment gateway. Please try again.' },
+      preview: {},
+      errorKind: 'GATEWAY_UNREACHABLE',
+    });
+
+    const { response, state } = createResponse();
+    await handler({ method: 'POST', headers: {}, body: VALID_BODY }, response as never);
+
+    expect(state.statusCode).toBe(502);
+    expect((state.jsonBody as { success: boolean }).success).toBe(false);
   });
 
   it('never returns the hash key, service key, or any internal config in the response body', async () => {

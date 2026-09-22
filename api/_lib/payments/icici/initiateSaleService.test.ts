@@ -166,4 +166,54 @@ describe('initiateIciciPayment', () => {
     expect(JSON.stringify(result.preview)).not.toContain(CONFIG.hashKey);
     expect(result.preview.hashKeyIncluded).toBe(false);
   });
+
+  describe('previously-uncaught failure paths (real sources of a generic 500 in production)', () => {
+    it('never throws when the initial DB write fails — returns a safe PERSISTENCE failure instead', async () => {
+      const repository = createFakeRepository();
+      repository.createInitiatedTransaction.mockRejectedValueOnce(new Error('connection refused'));
+      const fetchImpl = vi.fn();
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult.success).toBe(false);
+      expect(result.errorKind).toBe('PERSISTENCE');
+      // Never even attempted to reach ICICI — no record exists to reconcile against yet.
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(JSON.stringify(result.safeResult)).not.toContain('connection refused');
+    });
+
+    it('never throws when the outbound ICICI call itself fails at the network/transport level — returns a safe GATEWAY_UNREACHABLE failure instead', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult.success).toBe(false);
+      expect(result.errorKind).toBe('GATEWAY_UNREACHABLE');
+      expect(repository.recordInitiateSaleOutcome).toHaveBeenCalledWith(expect.objectContaining({ status: 'UNKNOWN' }));
+      expect(JSON.stringify(result.safeResult)).not.toContain('fetch failed');
+    });
+
+    it('still returns the safe result even if recording the network-failure outcome also fails', async () => {
+      const repository = createFakeRepository();
+      repository.recordInitiateSaleOutcome.mockRejectedValueOnce(new Error('db also down'));
+      const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult.success).toBe(false);
+      expect(result.errorKind).toBe('GATEWAY_UNREACHABLE');
+    });
+
+    it('still returns success:true even if recording the final INITIATED outcome fails after ICICI already accepted the request', async () => {
+      const repository = createFakeRepository();
+      repository.recordInitiateSaleOutcome.mockRejectedValueOnce(new Error('db write failed after accept'));
+      const fetchImpl = acceptedJsonFetch();
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult.success).toBe(true);
+      expect(result.safeResult.redirectURI).toBeDefined();
+    });
+  });
 });

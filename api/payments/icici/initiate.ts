@@ -140,7 +140,16 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       success: result.safeResult.success,
     });
 
-    return response.status(result.safeResult.success ? 200 : 502).json(result.safeResult);
+    if (result.safeResult.success) {
+      return response.status(200).json(result.safeResult);
+    }
+
+    // PERSISTENCE (our own DB unreachable) is a 503 — same family as the
+    // config-unavailable checks above. Everything else (ICICI rejected the
+    // request, or a network/transport failure reaching ICICI) is a 502 —
+    // the upstream gateway is the problem, not this route.
+    const statusCode = result.errorKind === 'PERSISTENCE' ? 503 : 502;
+    return response.status(statusCode).json(result.safeResult);
   } catch (error) {
     if (error instanceof IciciInitiateSaleValidationError) {
       return response.status(400).json({ success: false, message: 'Missing required payment details.' });

@@ -56,9 +56,40 @@ export interface IciciInitiateSaleServiceResult {
   preview: IciciInitiateSalePreview;
   httpStatus?: number;
   rawResponseCode?: string;
+  /**
+   * Set only when `safeResult.success` is false, to let the route choose
+   * an accurate HTTP status without re-deriving it: `PERSISTENCE` means
+   * Prezenti's own database couldn't be written to (maps to 503, same
+   * family as the existing config-unavailable checks); `GATEWAY_UNREACHABLE`
+   * means the outbound call to ICICI itself failed at the network/transport
+   * level — DNS, TLS, connection reset, timeout, or the UAT-host guard
+   * rejecting a misconfigured URL — as opposed to ICICI returning a clean
+   * but unusable HTTP response, which the existing `!httpResult.body`
+   * branch already handles (maps to 502, "bad gateway", same as ICICI
+   * rejecting the request outright).
+   */
+  errorKind?: 'PERSISTENCE' | 'GATEWAY_UNREACHABLE';
 }
 
 export class IciciInitiateSaleValidationError extends Error {}
+
+/**
+ * Records an Initiate Sale outcome without letting a persistence failure
+ * propagate — by the point this is called, ICICI has already responded
+ * (or we've already decided on a safe failure message), so a secondary
+ * DB write failure must be logged, not allowed to turn an otherwise-safe
+ * result into an uncaught error.
+ */
+async function recordOutcomeSafely(
+  deps: IciciInitiateSaleServiceDeps,
+  outcome: Parameters<PaymentTransactionRepository['recordInitiateSaleOutcome']>[0],
+): Promise<void> {
+  try {
+    await deps.repository.recordInitiateSaleOutcome(outcome);
+  } catch (error) {
+    console.error('[ICICI INITIATE] failed to record outcome:', error instanceof Error ? error.message : error);
+  }
+}
 
 function validateInput(input: IciciInitiateSaleServiceInput): void {
   const missing = (['internalReference', 'customerEmailID', 'customerMobileNo', 'customerName'] as const).filter(
@@ -94,21 +125,62 @@ export async function initiateIciciPayment(
     returnURL: deps.config.returnUrl,
   };
 
-  await deps.repository.createInitiatedTransaction({
-    merchantTxnNo,
-    amount: ICICI_UAT_TEST_AMOUNT,
-    currencyCode: deps.config.currencyCode,
-    internalReference: input.internalReference,
-    transactionInput,
-  });
-
+  // Built before the DB write and the ICICI call — pure/no I/O, so it's
+  // available for a safe failure response regardless of which step below
+  // fails, and never varies based on whether either succeeds.
   const requestBody = buildIciciInitiateSaleRequestBody(transactionInput, deps.config);
   const preview = buildIciciInitiateSalePreview(requestBody, deps.config.initiateSaleUrl);
 
-  const httpResult = await postIciciInitiateSale(deps.config.initiateSaleUrl, requestBody, deps.fetchImpl);
+  try {
+    await deps.repository.createInitiatedTransaction({
+      merchantTxnNo,
+      amount: ICICI_UAT_TEST_AMOUNT,
+      currencyCode: deps.config.currencyCode,
+      internalReference: input.internalReference,
+      transactionInput,
+    });
+  } catch (error) {
+    // A DB failure here means Prezenti's own persistence layer is
+    // unavailable — this must never reach ICICI (no record would exist
+    // to reconcile against) and must never surface as a raw 500 with an
+    // unclassified message. Previously uncaught; this was one real
+    // source of the generic 500 this integration was seeing in
+    // production.
+    console.error('[ICICI INITIATE] failed to persist initiated transaction:', error instanceof Error ? error.message : error);
+    return {
+      safeResult: { success: false, message: 'Unable to start your payment right now. Please try again.' },
+      preview,
+      errorKind: 'PERSISTENCE',
+    };
+  }
+
+  let httpResult;
+  try {
+    httpResult = await postIciciInitiateSale(deps.config.initiateSaleUrl, requestBody, deps.fetchImpl);
+  } catch (error) {
+    // Any network/transport-level failure calling ICICI itself — DNS,
+    // TLS, connection reset/refused, our own request timeout, or the
+    // UAT-host guard rejecting a misconfigured URL. Distinct from ICICI
+    // returning a real (if unusable) HTTP response, which the
+    // `!httpResult.body` branch below already handles safely. Previously
+    // uncaught; this was the other real source of the generic 500.
+    console.error('[ICICI INITIATE] gateway call failed:', error instanceof Error ? error.message : error);
+
+    await recordOutcomeSafely(deps, {
+      merchantTxnNo,
+      status: 'UNKNOWN',
+      rawInitiateResponse: { networkError: error instanceof Error ? error.message : 'unknown error' },
+    });
+
+    return {
+      safeResult: { success: false, merchantTxnNo, message: 'Unable to reach the payment gateway. Please try again.' },
+      preview,
+      errorKind: 'GATEWAY_UNREACHABLE',
+    };
+  }
 
   if (!httpResult.body) {
-    await deps.repository.recordInitiateSaleOutcome({
+    await recordOutcomeSafely(deps, {
       merchantTxnNo,
       status: 'UNKNOWN',
       rawInitiateResponse: { httpStatus: httpResult.httpStatus, parseError: httpResult.parseError },
@@ -130,7 +202,7 @@ export async function initiateIciciPayment(
   const rawResponseCode = typeof httpResult.body.responseCode === 'string' ? httpResult.body.responseCode : undefined;
 
   if (!validation.initiationAccepted) {
-    await deps.repository.recordInitiateSaleOutcome({
+    await recordOutcomeSafely(deps, {
       merchantTxnNo,
       status: 'FAILED',
       responseCode: rawResponseCode,
@@ -158,7 +230,7 @@ export async function initiateIciciPayment(
     safeRedirectUrl = buildIciciRedirectUrl(validation.redirectURI!, validation.tranCtx!);
   } catch (error) {
     const reason = error instanceof IciciUnsafeRedirectError ? error.message : 'unknown redirect validation error';
-    await deps.repository.recordInitiateSaleOutcome({
+    await recordOutcomeSafely(deps, {
       merchantTxnNo,
       status: 'UNKNOWN',
       responseCode: rawResponseCode,
@@ -179,7 +251,11 @@ export async function initiateIciciPayment(
 
   // Initiation accepted — the CUSTOMER HAS NOT PAID YET. This only means
   // ICICI is ready to receive the customer on its hosted payment page.
-  await deps.repository.recordInitiateSaleOutcome({
+  // A persistence failure here must never block a customer who already
+  // has a validated redirect from a genuine ICICI acceptance — the
+  // transaction record will simply be stale until reconciled (e.g. via
+  // the return/callback route, which upserts by merchantTxnNo anyway).
+  await recordOutcomeSafely(deps, {
     merchantTxnNo,
     status: 'INITIATED',
     responseCode: rawResponseCode,
