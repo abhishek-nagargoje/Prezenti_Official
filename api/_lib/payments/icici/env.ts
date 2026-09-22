@@ -146,8 +146,32 @@ export const ICICI_PRODUCTION_DEFAULT_URLS = {
 /** The only hostname this integration is permitted to call while ICICI_ENV=uat. Used as a hard outbound guard. */
 export const ICICI_UAT_HOSTNAME = 'pgpayuat.icicibank.com';
 
-/** The only hostname this integration is permitted to call while ICICI_ENV=production (and only once the production-confirm gate has passed). */
+/**
+ * The only hostname this integration is permitted to call (the outbound
+ * Initiate Sale / Command / Settlement API host) while ICICI_ENV=production
+ * (and only once the production-confirm gate has passed). Distinct from
+ * `ICICI_PRODUCTION_REDIRECT_HOSTNAMES` below — the API host and the
+ * hosted-payment-page redirect host are confirmed (live, production
+ * traffic) to be different ICICI domains; this constant is the API host
+ * only and must not be conflated with the redirect allow-list.
+ */
 export const ICICI_PRODUCTION_HOSTNAME = 'pgpay.icicibank.com';
 
 /** Every known ICICI production hostname — used by the UAT-mode host guard to positively (and specifically) refuse an accidental production call, rather than reporting it as merely "unexpected". */
 export const ICICI_PRODUCTION_HOSTNAMES = [ICICI_PRODUCTION_HOSTNAME];
+
+/**
+ * Every hostname ICICI is confirmed to use for the hosted Direct Orange
+ * payment page redirect target when `environment === 'production'` — used
+ * exclusively by `redirect.ts`'s exact-match allow-list, never for the
+ * outbound API call guard (see `ICICI_PRODUCTION_HOSTNAME` above).
+ *
+ * `pgpay.icicibank.com` — the documented/expected redirect host.
+ * `pgpay.icici.bank.in` — confirmed live: a real ICICI production R1000
+ * response's `redirectURI` used this hostname (verified via this
+ * integration's own forensic diagnostic logging against real production
+ * traffic, not assumed from the UAT pattern alone). Exact hostname
+ * matching only — no wildcard/subdomain matching is performed against
+ * either domain.
+ */
+export const ICICI_PRODUCTION_REDIRECT_HOSTNAMES = ['pgpay.icicibank.com', 'pgpay.icici.bank.in'] as const;

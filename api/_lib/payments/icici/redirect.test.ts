@@ -41,13 +41,42 @@ describe('buildIciciRedirectUrl', () => {
     );
   });
 
-  it('accepts the real ICICI production host under environment="production"', () => {
+  it('accepts pgpay.icicibank.com under environment="production"', () => {
     const result = buildIciciRedirectUrl('https://pgpay.icicibank.com/pg/somepage', 'ctx-prod', 'production');
     expect(result).toBe('https://pgpay.icicibank.com/pg/somepage?tranCtx=ctx-prod');
   });
 
+  it('accepts pgpay.icici.bank.in under environment="production" (confirmed live: ICICI\'s actual hosted-payment-page redirect host)', () => {
+    const result = buildIciciRedirectUrl('https://pgpay.icici.bank.in/pg/somepage', 'ctx-prod', 'production');
+    expect(result).toBe('https://pgpay.icici.bank.in/pg/somepage?tranCtx=ctx-prod');
+  });
+
+  it('rejects an arbitrary attacker-controlled host under environment="production", even one that looks plausible', () => {
+    expect(() => buildIciciRedirectUrl('https://pgpay.icici.bank.in.evil.example.com/page', 'ctx', 'production')).toThrow(
+      IciciUnsafeRedirectError,
+    );
+    expect(() => buildIciciRedirectUrl('https://evil.example.com/page', 'ctx', 'production')).toThrow(
+      IciciUnsafeRedirectError,
+    );
+  });
+
+  it('rejects HTTP (not HTTPS) even for an otherwise-allowed production hostname', () => {
+    expect(() => buildIciciRedirectUrl('http://pgpay.icici.bank.in/pg/somepage', 'ctx', 'production')).toThrow(
+      IciciUnsafeRedirectError,
+    );
+    expect(() => buildIciciRedirectUrl('http://pgpay.icicibank.com/pg/somepage', 'ctx', 'production')).toThrow(
+      IciciUnsafeRedirectError,
+    );
+  });
+
   it('rejects the UAT host under environment="production" — the two can never be mixed', () => {
     expect(() => buildIciciRedirectUrl(VALID_REDIRECT, 'ctx', 'production')).toThrow(IciciUnsafeRedirectError);
+  });
+
+  it('rejects pgpay.icici.bank.in under environment="uat" (production redirect hosts never bleed into UAT)', () => {
+    expect(() => buildIciciRedirectUrl('https://pgpay.icici.bank.in/pg/somepage', 'ctx', 'uat')).toThrow(
+      IciciUnsafeRedirectError,
+    );
   });
 
   it('rejects a malformed URL', () => {

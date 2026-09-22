@@ -144,14 +144,6 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       success: result.safeResult.success,
     });
 
-    // TEMPORARY forensic logging for the "R1000 but success:false"
-    // investigation — see IciciInitiateSaleServiceResult.diagnostic doc
-    // comment. Safe: booleans, field names, generic reason strings, and a
-    // redirect HOSTNAME only. Remove once the root cause is confirmed.
-    if (result.diagnostic) {
-      console.info('[ICICI INITIATE DIAGNOSTIC]', result.diagnostic);
-    }
-
     if (result.safeResult.success) {
       return response.status(200).json(result.safeResult);
     }

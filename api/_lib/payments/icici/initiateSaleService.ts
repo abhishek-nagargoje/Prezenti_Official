@@ -66,11 +66,15 @@ export interface IciciInitiateSaleServiceResult {
    */
   rawResponseDescription?: string;
   /**
-   * TEMPORARY forensic diagnostics for the "R1000 but success:false"
-   * investigation — safe to log (booleans, field names, generic reason
-   * strings, and a redirect HOSTNAME only, never a full URL/query string,
-   * never the secureHash, never any credential). Remove once the root
-   * cause is confirmed and fixed.
+   * Structured diagnostic detail behind `initiationAccepted`/the redirect
+   * decision — safe to log or inspect (booleans, field names, generic
+   * reason strings, and a redirect HOSTNAME only, never a full URL/query
+   * string, never the secureHash, never any credential). Originated as
+   * forensics for a specific incident (an accepted R1000 whose redirect
+   * host wasn't yet on the production allow-list — see
+   * ICICI_PRODUCTION_REDIRECT_HOSTNAMES in env.ts) and is kept as a
+   * regression guard: it is pure computed data (no I/O), tested directly,
+   * and not logged anywhere by default — a caller opts in if it wants to.
    */
   diagnostic?: {
     validationInitiationAccepted: boolean;
@@ -243,7 +247,7 @@ export async function initiateIciciPayment(
     (typeof httpResult.body.responseDescription === 'string' ? httpResult.body.responseDescription : undefined) ??
     (typeof httpResult.body.respDescription === 'string' ? httpResult.body.respDescription : undefined);
 
-  // TEMPORARY forensic diagnostics — see IciciInitiateSaleServiceResult.diagnostic doc comment.
+  // See IciciInitiateSaleServiceResult.diagnostic doc comment.
   function safeHostnameOf(value: string | undefined): string | undefined {
     if (!value) return undefined;
     try {
