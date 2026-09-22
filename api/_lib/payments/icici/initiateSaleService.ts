@@ -57,6 +57,15 @@ export interface IciciInitiateSaleServiceResult {
   httpStatus?: number;
   rawResponseCode?: string;
   /**
+   * ICICI's own human-readable reason for the response, when present —
+   * server-side diagnostics only (logged, never returned to the browser
+   * in `safeResult`, never persisted anywhere it could be mistaken for a
+   * secret). ICICI has been observed using both `responseDescription`
+   * (Initiate Sale) and `respDescription` (other endpoints) for this;
+   * both are checked. Never the secureHash, never a credential.
+   */
+  rawResponseDescription?: string;
+  /**
    * Set only when `safeResult.success` is false, to let the route choose
    * an accurate HTTP status without re-deriving it: `PERSISTENCE` means
    * Prezenti's own database couldn't be written to (maps to 503, same
@@ -206,6 +215,13 @@ export async function initiateIciciPayment(
   });
 
   const rawResponseCode = typeof httpResult.body.responseCode === 'string' ? httpResult.body.responseCode : undefined;
+  // ICICI has been observed using both field names for this across
+  // different responses (`responseDescription` on Initiate Sale,
+  // `respDescription` elsewhere) — check both. This is ICICI's own
+  // human-readable reason text, never a secret.
+  const rawResponseDescription =
+    (typeof httpResult.body.responseDescription === 'string' ? httpResult.body.responseDescription : undefined) ??
+    (typeof httpResult.body.respDescription === 'string' ? httpResult.body.respDescription : undefined);
 
   if (!validation.initiationAccepted) {
     await recordOutcomeSafely(deps, {
@@ -224,6 +240,7 @@ export async function initiateIciciPayment(
       preview,
       httpStatus: httpResult.httpStatus,
       rawResponseCode,
+      rawResponseDescription,
     };
   }
 
@@ -252,6 +269,7 @@ export async function initiateIciciPayment(
       preview,
       httpStatus: httpResult.httpStatus,
       rawResponseCode,
+      rawResponseDescription,
     };
   }
 
@@ -279,5 +297,6 @@ export async function initiateIciciPayment(
     preview,
     httpStatus: httpResult.httpStatus,
     rawResponseCode,
+    rawResponseDescription,
   };
 }

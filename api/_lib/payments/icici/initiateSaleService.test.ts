@@ -136,6 +136,40 @@ describe('initiateIciciPayment', () => {
     expect(repository.recordInitiateSaleOutcome).toHaveBeenCalledWith(expect.objectContaining({ status: 'FAILED' }));
   });
 
+  it('surfaces ICICI\'s own responseDescription as a server-side diagnostic field, never in the browser-facing safeResult', async () => {
+    const repository = createFakeRepository();
+    const fetchImpl = jsonFetch(200, {
+      responseCode: 'P1006',
+      merchantId: CONFIG.merchantId,
+      aggregatorID: CONFIG.aggregatorId,
+      responseDescription: 'Invalid request: Secure hash does not match',
+      secureHash: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    });
+
+    const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+    expect(result.rawResponseCode).toBe('P1006');
+    expect(result.rawResponseDescription).toBe('Invalid request: Secure hash does not match');
+    // Never leaked to the customer-facing result, and never any hash value.
+    expect(result.safeResult).not.toHaveProperty('rawResponseDescription');
+    expect(JSON.stringify(result.safeResult)).not.toContain('Secure hash does not match');
+    expect(JSON.stringify(result.safeResult)).not.toContain('deadbeef');
+  });
+
+  it('also checks respDescription (the alternate field name ICICI uses elsewhere) when responseDescription is absent', async () => {
+    const repository = createFakeRepository();
+    const fetchImpl = jsonFetch(200, {
+      responseCode: 'R1001',
+      merchantId: CONFIG.merchantId,
+      aggregatorID: CONFIG.aggregatorId,
+      respDescription: 'Some other rejection reason',
+    });
+
+    const result = await initiateIciciPayment(VALID_INPUT, { config: CONFIG, repository, fetchImpl });
+
+    expect(result.rawResponseDescription).toBe('Some other rejection reason');
+  });
+
   it('marks the transaction UNKNOWN (never FAILED or SUCCESS) on a malformed/non-JSON gateway response', async () => {
     const repository = createFakeRepository();
     const fetchImpl = vi.fn().mockResolvedValue({ status: 502, text: async () => '<html>Bad Gateway</html>' });

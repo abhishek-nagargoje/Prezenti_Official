@@ -132,11 +132,15 @@ export default async function handler(request: ApiRequest, response: ApiResponse
 
     // Log only the redacted preview and outcome — never the raw ICICI
     // response body (may include fields we haven't audited) and never
-    // any credential.
+    // any credential. rawResponseDescription is ICICI's own
+    // human-readable rejection reason (e.g. "Invalid request: Secure
+    // hash does not match") — safe, non-secret diagnostic text, never
+    // the secureHash value itself or any credential.
     console.info('[ICICI INITIATE]', {
       merchantTxnNo: result.safeResult.merchantTxnNo,
       httpStatus: result.httpStatus,
       rawResponseCode: result.rawResponseCode,
+      rawResponseDescription: result.rawResponseDescription,
       success: result.safeResult.success,
     });
 

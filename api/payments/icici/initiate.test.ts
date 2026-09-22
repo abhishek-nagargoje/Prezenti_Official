@@ -163,6 +163,27 @@ describe('POST /api/payments/icici/initiate', () => {
     expect((state.jsonBody as { success: boolean }).success).toBe(false);
   });
 
+  it('logs rawResponseDescription server-side for diagnosis, but never includes it in the browser-facing response body', async () => {
+    mockInitiateIciciPayment.mockResolvedValueOnce({
+      safeResult: { success: false, merchantTxnNo: 'PZ123ABC', message: 'The payment gateway rejected this request.' },
+      preview: {},
+      httpStatus: 200,
+      rawResponseCode: 'P1006',
+      rawResponseDescription: 'Invalid request: Secure hash does not match',
+    });
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { response, state } = createResponse();
+    await handler({ method: 'POST', headers: {}, body: VALID_BODY }, response as never);
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[ICICI INITIATE]',
+      expect.objectContaining({ rawResponseDescription: 'Invalid request: Secure hash does not match' }),
+    );
+    infoSpy.mockRestore();
+    expect(JSON.stringify(state.jsonBody)).not.toContain('Secure hash does not match');
+  });
+
   it('never returns the hash key, service key, or any internal config in the response body', async () => {
     mockInitiateIciciPayment.mockResolvedValueOnce({
       safeResult: { success: true, merchantTxnNo: 'PZ123ABC', redirectURI: 'https://pgpayuat.icicibank.com/x', tranCtx: 'ctx' },
