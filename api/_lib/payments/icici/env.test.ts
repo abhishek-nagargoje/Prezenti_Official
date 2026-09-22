@@ -124,9 +124,12 @@ describe('getIciciConfig', () => {
       expect(config.merchantId).toBe('prod-merchant');
       expect(config.aggregatorId).toBe('prod-aggregator');
       expect(config.hashKey).toBe('prod-key');
-      expect(config.initiateSaleUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale');
-      expect(config.commandUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/command');
-      expect(config.settlementDetailsUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/settlementDetails');
+      // Production paths do NOT carry the "/tsp" prefix UAT uses — confirmed
+      // live (a GET to the /tsp/... path returned 404 from ICICI's own
+      // production nginx). Only UAT uses "/tsp/pg/api/...".
+      expect(config.initiateSaleUrl).toBe('https://pgpay.icicibank.com/pg/api/v2/initiateSale');
+      expect(config.commandUrl).toBe('https://pgpay.icicibank.com/pg/api/command');
+      expect(config.settlementDetailsUrl).toBe('https://pgpay.icicibank.com/pg/api/settlementDetails');
     });
 
     it('never falls back to UAT credentials (ICICI_MERCHANT_ID etc.) even if they happen to also be set', () => {

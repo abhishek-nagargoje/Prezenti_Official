@@ -226,9 +226,12 @@ describe('initiateIciciPayment', () => {
       currencyCode: '356',
       payType: '0',
       transactionType: 'SALE',
-      initiateSaleUrl: 'https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale',
-      commandUrl: 'https://pgpay.icicibank.com/tsp/pg/api/command',
-      settlementDetailsUrl: 'https://pgpay.icicibank.com/tsp/pg/api/settlementDetails',
+      // Production paths do NOT carry the "/tsp" prefix UAT uses — only UAT
+      // uses "/tsp/pg/api/...". Confirmed live: a GET to the /tsp/... path
+      // returned 404 from ICICI's own production nginx.
+      initiateSaleUrl: 'https://pgpay.icicibank.com/pg/api/v2/initiateSale',
+      commandUrl: 'https://pgpay.icicibank.com/pg/api/command',
+      settlementDetailsUrl: 'https://pgpay.icicibank.com/pg/api/settlementDetails',
       returnUrl: 'https://www.prezenti.com/api/payments/icici/return',
     };
 
@@ -243,7 +246,7 @@ describe('initiateIciciPayment', () => {
               merchantId: PRODUCTION_CONFIG.merchantId,
               aggregatorID: PRODUCTION_CONFIG.aggregatorId,
               merchantTxnNo: sentBody.merchantTxnNo,
-              redirectURI: 'https://pgpay.icicibank.com/tsp/pg/somepage',
+              redirectURI: 'https://pgpay.icicibank.com/pg/somepage',
               tranCtx: 'ctx-prod-abc',
             }),
         };
@@ -257,9 +260,9 @@ describe('initiateIciciPayment', () => {
       const result = await initiateIciciPayment(VALID_INPUT, { config: PRODUCTION_CONFIG, repository, fetchImpl });
 
       expect(fetchImpl).toHaveBeenCalledTimes(1);
-      expect(fetchImpl.mock.calls[0][0]).toBe('https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale');
+      expect(fetchImpl.mock.calls[0][0]).toBe('https://pgpay.icicibank.com/pg/api/v2/initiateSale');
       expect(result.safeResult.success).toBe(true);
-      expect(result.safeResult.redirectURI).toBe('https://pgpay.icicibank.com/tsp/pg/somepage?tranCtx=ctx-prod-abc');
+      expect(result.safeResult.redirectURI).toBe('https://pgpay.icicibank.com/pg/somepage?tranCtx=ctx-prod-abc');
     });
 
     it('never returns the production hash key in the safe result or preview', async () => {

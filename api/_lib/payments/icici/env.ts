@@ -49,9 +49,14 @@ function requireEnv(name: string): string {
 const UAT_DEFAULT_INITIATE_SALE_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale';
 const UAT_DEFAULT_COMMAND_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/command';
 const UAT_DEFAULT_SETTLEMENT_DETAILS_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/settlementDetails';
-const PROD_DEFAULT_INITIATE_SALE_URL = 'https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale';
-const PROD_DEFAULT_COMMAND_URL = 'https://pgpay.icicibank.com/tsp/pg/api/command';
-const PROD_DEFAULT_SETTLEMENT_DETAILS_URL = 'https://pgpay.icicibank.com/tsp/pg/api/settlementDetails';
+// NOTE: production paths do NOT carry the "/tsp" prefix UAT uses — this
+// was a real bug (confirmed live: a GET to .../tsp/pg/api/v2/initiateSale
+// returned 404 from ICICI's own production nginx). The official spec's
+// production path is "/pg/api/..." — UAT is the only environment that
+// uses "/tsp/pg/api/...".
+const PROD_DEFAULT_INITIATE_SALE_URL = 'https://pgpay.icicibank.com/pg/api/v2/initiateSale';
+const PROD_DEFAULT_COMMAND_URL = 'https://pgpay.icicibank.com/pg/api/command';
+const PROD_DEFAULT_SETTLEMENT_DETAILS_URL = 'https://pgpay.icicibank.com/pg/api/settlementDetails';
 
 function getUatIciciConfig(): IciciConfig {
   return {
