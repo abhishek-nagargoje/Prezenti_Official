@@ -18,11 +18,11 @@
  * route (see docs/icici-orange-pg-integration.md §9).
  */
 
-import { getIciciConfig } from '../../_lib/payments/icici/env';
+import { getIciciConfig } from '../../_lib/payments/icici/env.js';
 import {
   createSupabaseClientFromEnv,
   createSupabasePaymentTransactionRepository,
-} from '../../_lib/payments/icici/repository';
+} from '../../_lib/payments/icici/repository.js';
 
 interface ApiRequest {
   method?: string;

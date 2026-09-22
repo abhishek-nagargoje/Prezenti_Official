@@ -22,13 +22,13 @@
  * ICICI response body, never any internal id.
  */
 
-import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env';
-import { checkIciciTransactionStatus } from '../../_lib/payments/icici/statusCheck';
+import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env.js';
+import { checkIciciTransactionStatus } from '../../_lib/payments/icici/statusCheck.js';
 import {
   createSupabaseClientFromEnv,
   createSupabasePaymentTransactionRepository,
   type PublicPaymentTransactionStatus,
-} from '../../_lib/payments/icici/repository';
+} from '../../_lib/payments/icici/repository.js';
 
 interface ApiRequest {
   method?: string;

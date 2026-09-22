@@ -31,13 +31,13 @@ import {
   processIciciReturn,
   validateIciciReturnPayloadShape,
   type IciciReturnPayload,
-} from '../../_lib/payments/icici/callback';
-import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env';
-import { parseIciciDateTime } from '../../_lib/payments/icici/txnDate';
+} from '../../_lib/payments/icici/callback.js';
+import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env.js';
+import { parseIciciDateTime } from '../../_lib/payments/icici/txnDate.js';
 import {
   createSupabaseClientFromEnv,
   createSupabasePaymentTransactionRepository,
-} from '../../_lib/payments/icici/repository';
+} from '../../_lib/payments/icici/repository.js';
 
 interface ApiRequest {
   method?: string;

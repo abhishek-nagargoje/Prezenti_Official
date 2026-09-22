@@ -9,8 +9,8 @@
 import {
   generateIciciDirectOrangeInitiateSaleHash,
   type IciciDirectOrangeInitiateSaleFields,
-} from './crypto';
-import type { IciciConfig } from './env';
+} from './crypto.js';
+import type { IciciConfig } from './env.js';
 
 /** Authoritative, server-resolved data for one Initiate Sale request. Never derived from unvalidated browser input. */
 export interface IciciInitiateSaleTransactionInput {

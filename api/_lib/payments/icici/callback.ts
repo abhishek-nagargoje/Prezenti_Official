@@ -31,8 +31,8 @@
  * POST body, e.g. query-string-only) is UNKNOWN/rejected, never trusted.
  */
 
-import { verifyIciciHashV1 } from './crypto';
-import { mapIciciPaymentResponseCode, type IciciInternalTransactionStatus } from './responseCodes';
+import { verifyIciciHashV1 } from './crypto.js';
+import { mapIciciPaymentResponseCode, type IciciInternalTransactionStatus } from './responseCodes.js';
 
 /**
  * The documented Payment Response fields (Chapter 7.1 table + the

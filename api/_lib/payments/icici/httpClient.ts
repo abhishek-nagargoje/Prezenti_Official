@@ -11,10 +11,10 @@
  * accidentally permit a production call.
  */
 
-import { ICICI_PRODUCTION_HOSTNAMES, ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env';
-import type { IciciInitiateSaleRequestBody } from './requestBuilder';
-import type { IciciInitiateSaleResponse } from './initiateSaleResponse';
-import type { IciciStatusCheckResponse } from './statusCheck';
+import { ICICI_PRODUCTION_HOSTNAMES, ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env.js';
+import type { IciciInitiateSaleRequestBody } from './requestBuilder.js';
+import type { IciciInitiateSaleResponse } from './initiateSaleResponse.js';
+import type { IciciStatusCheckResponse } from './statusCheck.js';
 
 /** Default request timeout for all outbound ICICI calls — the bank's API has no documented SLA, so a conservative, explicit bound is used rather than relying on Vercel's own function timeout. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;

@@ -14,12 +14,12 @@
  * request body. See initiateSaleService.ts.
  */
 
-import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env';
-import { initiateIciciPayment, IciciInitiateSaleValidationError } from '../../_lib/payments/icici/initiateSaleService';
+import { getIciciConfig, IciciConfigError } from '../../_lib/payments/icici/env.js';
+import { initiateIciciPayment, IciciInitiateSaleValidationError } from '../../_lib/payments/icici/initiateSaleService.js';
 import {
   createSupabaseClientFromEnv,
   createSupabasePaymentTransactionRepository,
-} from '../../_lib/payments/icici/repository';
+} from '../../_lib/payments/icici/repository.js';
 
 interface ApiRequest {
   method?: string;

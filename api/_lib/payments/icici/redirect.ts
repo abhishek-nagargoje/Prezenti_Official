@@ -21,7 +21,7 @@
  *   this function never accepts anything derived from browser input.
  */
 
-import { ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env';
+import { ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env.js';
 
 export class IciciUnsafeRedirectError extends Error {}
 

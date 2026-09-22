@@ -14,7 +14,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { IciciInitiateSaleTransactionInput } from './requestBuilder';
+import type { IciciInitiateSaleTransactionInput } from './requestBuilder.js';
 
 export type PaymentTransactionStatus =
   | 'INITIATED'

@@ -5,7 +5,7 @@
  * substring anywhere in its serialized form.
  */
 
-import type { IciciInitiateSaleRequestBody } from './requestBuilder';
+import type { IciciInitiateSaleRequestBody } from './requestBuilder.js';
 
 export interface IciciInitiateSalePreview {
   endpoint: string;

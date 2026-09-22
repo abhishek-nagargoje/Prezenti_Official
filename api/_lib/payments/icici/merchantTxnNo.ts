@@ -8,7 +8,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { ICICI_MERCHANT_TXN_NO_MAX_LENGTH } from './crypto';
+import { ICICI_MERCHANT_TXN_NO_MAX_LENGTH } from './crypto.js';
 
 const PREFIX = 'PZ';
 /** 4 random bytes -> 8 hex chars of collision resistance per merchantTxnNo. */

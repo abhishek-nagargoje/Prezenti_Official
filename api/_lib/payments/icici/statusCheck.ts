@@ -36,10 +36,10 @@
  *   paymentInstId, customerMobileNo), consistent with Note 1.
  */
 
-import { generateIciciHashV1, verifyIciciHashV1 } from './crypto';
-import { postIciciCommand, IciciRequestTimeoutError } from './httpClient';
-import { mapIciciTxnStatusToInternalStatus, type IciciInternalTransactionStatus } from './responseCodes';
-import type { IciciConfig } from './env';
+import { generateIciciHashV1, verifyIciciHashV1 } from './crypto.js';
+import { postIciciCommand, IciciRequestTimeoutError } from './httpClient.js';
+import { mapIciciTxnStatusToInternalStatus, type IciciInternalTransactionStatus } from './responseCodes.js';
+import type { IciciConfig } from './env.js';
 
 export interface IciciStatusCheckRequestFields {
   merchantId: string;

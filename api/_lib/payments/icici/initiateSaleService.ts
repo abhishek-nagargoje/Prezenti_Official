@@ -14,15 +14,15 @@
  * server-resolved pricing only once that architecture exists.
  */
 
-import { generateIciciMerchantTxnNo } from './merchantTxnNo';
-import { generateIciciTxnDate } from './txnDate';
-import { buildIciciInitiateSaleRequestBody } from './requestBuilder';
-import { buildIciciInitiateSalePreview, type IciciInitiateSalePreview } from './redactedPreview';
-import { postIciciInitiateSale } from './httpClient';
-import { validateIciciInitiateSaleResponse } from './initiateSaleResponse';
-import { buildIciciRedirectUrl, IciciUnsafeRedirectError } from './redirect';
-import type { IciciConfig } from './env';
-import type { PaymentTransactionRepository } from './repository';
+import { generateIciciMerchantTxnNo } from './merchantTxnNo.js';
+import { generateIciciTxnDate } from './txnDate.js';
+import { buildIciciInitiateSaleRequestBody } from './requestBuilder.js';
+import { buildIciciInitiateSalePreview, type IciciInitiateSalePreview } from './redactedPreview.js';
+import { postIciciInitiateSale } from './httpClient.js';
+import { validateIciciInitiateSaleResponse } from './initiateSaleResponse.js';
+import { buildIciciRedirectUrl, IciciUnsafeRedirectError } from './redirect.js';
+import type { IciciConfig } from './env.js';
+import type { PaymentTransactionRepository } from './repository.js';
 
 /** Fixed UAT validation amount, per instruction — matches the ICICI documented sample. Never sourced from the browser. */
 export const ICICI_UAT_TEST_AMOUNT = '2.00';
