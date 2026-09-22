@@ -1,6 +1,8 @@
 # ICICI Bank Orange PG (Direct Orange) Integration
 
-Status: **UAT foundation implemented and code-complete — Initiate Sale, return/callback (with transaction correlation), and STATUS (hashing + full HTTP integration + a public reconciliation route) all confirmed against the official ICICI document and tested with real, reproducible cryptography. The Supabase project is now confirmed live and schema-verified, including a live disposable end-to-end repository test. Not yet UAT-tested end-to-end** — no live ICICI network call has ever been made from this integration. No secret values appear anywhere in this document — see `.env.example` for variable names only.
+Status: **PRODUCTION Initiate Sale confirmed working end-to-end against the real bank.** A live production Initiate Sale request (real `ICICI_PROD_*` credentials, real ₹2.00 test amount) was accepted by ICICI (`R1000`), the redirect was validated and followed, and the browser reached ICICI's real hosted Direct Orange payment page. This is the first genuine, non-simulated confirmation this integration has ever had. The payment itself was **not** completed (deliberately stopped at the hosted page). UAT's own gateway was separately observed down (`502`, bank-side infrastructure) during this integration's development and was never completed end-to-end — production is now the confirmed-working path. No secret values appear anywhere in this document — see `.env.example` for variable names only.
+
+**What this does and does not prove**: confirmed — production credentials, hash generation, the Initiate Sale request shape, and the redirect-host allow-list are all correct as of commit `3399d39`. **Not yet confirmed**: the return/callback leg against a real bank callback (no real customer has completed a payment yet), STATUS/reconciliation against a real bank response, and — critically — **the amount is still the fixed ₹2.00 UAT/demo value, not real order pricing** (see §5). Do not treat this as "ready for real customer payments" until §5's pricing gap is closed.
 
 ## 1. Architecture
 
@@ -58,21 +60,20 @@ Server-side only. Never set any of these as `VITE_*`/`NEXT_PUBLIC_*`/`PUBLIC_*`.
 | `SUPABASE_SECRET_KEY` | server-side DB access, bypasses RLS (current Supabase naming) | **Secret.** Primary; `SUPABASE_SERVICE_ROLE_KEY` (legacy JWT-format key) is read as a fallback only. |
 | `SUPABASE_URL` (or reuses `VITE_SUPABASE_URL`) | project URL (not secret) | **Project confirmed live** — see §6. |
 
-## 4a. ICICI production support — code-complete, deliberately kept inert
+## 4a. ICICI production — confirmed working, but only for the fixed demo amount
 
-Production is now **supported in code** (separate `ICICI_PROD_*` credential variables, separate `pgpay.icicibank.com` endpoints, environment-aware host guard) but is **not ready to actually be used**, and is kept behind a second, independent gate on top of `ICICI_ENV=production` for exactly that reason:
+Production is **enabled and confirmed working end-to-end against the real bank**: `ICICI_ENV=production` and `ICICI_PRODUCTION_CONFIRM` are both set in the live Vercel Production environment, real `ICICI_PROD_*` credentials are provisioned, and a real Initiate Sale request was accepted by ICICI (`R1000`) with a customer successfully reaching ICICI's real hosted Direct Orange payment page. The payment itself was not completed (deliberately stopped at the hosted page, per instruction).
 
-- `ICICI_ENV=production` alone is **not sufficient**. `getIciciConfig()` additionally requires `ICICI_PRODUCTION_CONFIRM` to equal the exact literal value in `ICICI_PRODUCTION_CONFIRMATION_VALUE` (`api/_lib/payments/icici/env.ts`) — otherwise it throws `IciciConfigError`, the same as a missing credential. This means a stray or copy-pasted `ICICI_ENV=production` in any environment can never silently enable real payments.
-- When both gates pass, credentials are read from `ICICI_PROD_MERCHANT_ID`/`ICICI_PROD_AGGREGATOR_ID`/`ICICI_PROD_HASH_KEY` — entirely separate variable names from the UAT ones, with no fallback in either direction, so UAT and production credentials can never be mixed up.
-- `httpClient.ts`'s host guard (`assertIciciHostMatchesEnvironment`) is now environment-aware: a UAT config can only ever reach `pgpayuat.icicibank.com`; a production config can only ever reach `pgpay.icicibank.com`; neither can ever reach the other's host, regardless of what URL a config happens to compute. A call site that omits the environment parameter defaults to `'uat'` — the restrictive choice.
+- `ICICI_ENV=production` alone is still **not sufficient** on its own — `getIciciConfig()` additionally requires `ICICI_PRODUCTION_CONFIRM` to equal the exact literal value in `ICICI_PRODUCTION_CONFIRMATION_VALUE` (`api/_lib/payments/icici/env.ts`). This remains a deliberate second gate; it is now satisfied in production by an explicit choice, not by accident.
+- Credentials are read from `ICICI_PROD_MERCHANT_ID`/`ICICI_PROD_AGGREGATOR_ID`/`ICICI_PROD_HASH_KEY` — entirely separate variable names from the UAT ones, with no fallback in either direction.
+- `httpClient.ts`'s host guard (`assertIciciHostMatchesEnvironment`) is environment-aware: a UAT config can only ever reach `pgpayuat.icicibank.com`; a production config can only ever reach `pgpay.icicibank.com` (the API call host). A call site that omits the environment parameter defaults to `'uat'` — the restrictive choice.
+- **Redirect validation uses a separate, small allow-list** (`ICICI_PRODUCTION_REDIRECT_HOSTNAMES` in `env.ts`): `pgpay.icicibank.com` **and** `pgpay.icici.bank.in`. This was a real incident during rollout — ICICI's confirmed, real hosted-payment-page redirect target is `pgpay.icici.bank.in`, a *different* domain from the API call host it accepted the request on. The original single-hostname check rejected every genuine acceptance as an "unsafe redirect" until this was diagnosed via forensic logging against real production traffic and fixed (commit `3399d39`). Exact hostname matching only, in both directions — no wildcard/subdomain matching, UAT and production allow-lists never cross.
 
-**Why production must still not actually be enabled**, independent of the code now supporting it:
+**Why this is still not ready for real customer traffic, despite the confirmed working redirect:**
 
-1. **The ₹2.00 fixed UAT test amount (§5) is still hardcoded and used unconditionally, regardless of environment.** Enabling production today, as-is, would charge every real customer exactly ₹2.00 instead of what they actually owe. This must be replaced with a real server-resolved amount *before* production is ever enabled — not after.
-2. **UAT itself has never been confirmed working end-to-end against the real bank** — the last live diagnostic against ICICI's own UAT gateway returned a bank-side `502` (see git history for the full diagnostic). No hash formula, callback, or STATUS check has ever been validated against an actual bank response.
-3. Real production credentials (`ICICI_PROD_MERCHANT_ID`/`ICICI_PROD_AGGREGATOR_ID`/`ICICI_PROD_HASH_KEY`) have not been provisioned in this environment.
-
-**`ICICI_PRODUCTION_CONFIRM` must remain unset until all three of the above are explicitly resolved and a human has made the deliberate decision to go live.**
+1. **The ₹2.00 fixed UAT/demo test amount (§5) is still hardcoded and used unconditionally, regardless of environment.** The confirmed production transaction above used this same fixed ₹2.00 value — it did **not** exercise any real pricing logic, because none exists yet. Every real customer would currently be charged exactly ₹2.00 instead of what they actually owe. This must be replaced with a real server-resolved amount before this is used for actual customer payments.
+2. **Only the Initiate Sale leg has been confirmed against the real bank.** The return/callback route, transaction correlation, and STATUS/reconciliation have all been unit-tested with real cryptography but never exercised against an actual ICICI callback or STATUS response — no customer has completed a real payment yet, so this hasn't happened naturally either.
+3. UAT's own gateway was separately observed down (bank-side `502` infrastructure outage) during earlier development and was never completed end-to-end — this is a historical note, not a current blocker, since production is now the confirmed-working path.
 
 ## 3. Direct Orange PG Initiate Sale
 
@@ -113,7 +114,7 @@ Prezenti currently has **no order/quote/invoice pricing model with a stored amou
 
 Per instruction, the browser is never allowed to supply or influence the amount. Until a real pricing/order model exists, `initiateSaleService.ts` uses a fixed constant, `ICICI_UAT_TEST_AMOUNT = "2.00"` (matching the ICICI documented sample), and the input type accepted from the frontend (`IciciInitiateSaleServiceInput`) has **no amount field at all** — a browser-supplied amount is structurally impossible to reach ICICI through this code path, not just filtered out by convention.
 
-This must not be treated as a production amount model. Before enabling any non-test customer payment, this constant must be replaced with a real server-resolved amount tied to an actual order/quote record.
+This must not be treated as a production amount model — confirmed by the fact that the live, confirmed-working production transaction (§4a) also used this same fixed ₹2.00 value, not real pricing. Before enabling any non-test customer payment, this constant must be replaced with a real server-resolved amount tied to an actual order/quote record. This is the single remaining hard blocker between "production redirect confirmed working" and "ready for real customer payments."
 
 ## 6. Database
 
@@ -213,11 +214,12 @@ Settlement Details/Advice exists in the supplied material but is unrelated to co
 
 ## 14. Known limitations / blockers (current, verified — not hypothetical)
 
-1. **No live ICICI network call has ever been made** — this integration has never sent a request to any ICICI UAT or production endpoint. All cryptography is verified against the official document's worked examples and independently-computed reference hashes, not bank-issued responses.
-2. **No real pricing/order model** — the fixed UAT test amount (§5) must be replaced before real customer payments are enabled.
-3. **`addlParam1`/`addlParam2` empty-value representation unconfirmed** (§3) — the doc doesn't state what an absent optional parameter should look like on the wire (omitted vs. empty string).
-4. **No rate limiting on `reconcile` or `status`** (§9) — both public routes trust origin-checking and `merchantTxnNo`'s own entropy (timestamp + random suffix) as the only enumeration mitigations; no dedicated rate limiter exists in this codebase. Acceptable for controlled UAT testing; revisit before any production traffic.
-5. This integration has never been exercised against a real ICICI UAT response. The database, callback route, reconciliation route, and idempotency logic have all been exercised against the live, confirmed Supabase project (§6, §10) with real round-trips and cleanup.
+1. **No real pricing/order model — the hard blocker before real customer payments.** The fixed ₹2.00 test amount (§5) is still used unconditionally; the confirmed-working production transaction (§4a) used this same fixed value, not real pricing.
+2. **Return/callback and STATUS have not been exercised against a real bank response** — only Initiate Sale has (§4a). No real customer has completed a payment yet, so the callback route has never received a genuine ICICI POST.
+3. **`addlParam1`/`addlParam2` empty-value representation unconfirmed** (§3) — the doc doesn't state what an absent optional parameter should look like on the wire (omitted vs. empty string). Did not block the confirmed production acceptance, but remains unconfirmed against the doc itself.
+4. **No rate limiting on `reconcile` or `status`** (§9) — both public routes trust origin-checking and `merchantTxnNo`'s own entropy (timestamp + random suffix) as the only enumeration mitigations; no dedicated rate limiter exists in this codebase. Revisit before real customer traffic.
+5. UAT's own gateway was separately observed down (bank-side infrastructure `502`) during earlier development and was never completed end-to-end — historical note only; production is now the confirmed-working path (§4a).
+6. The database, callback route, reconciliation route, and idempotency logic have all been exercised against the live, confirmed Supabase project (§6, §10) with real round-trips and cleanup — but only with synthetic/local data, not yet a real ICICI callback (see #2 above).
 
 ## 15. Security summary
 
