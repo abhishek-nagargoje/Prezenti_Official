@@ -42,7 +42,9 @@ Server-side only. Never set any of these as `VITE_*`/`NEXT_PUBLIC_*`/`PUBLIC_*`.
 
 | Variable | Purpose | Notes |
 |---|---|---|
-| `ICICI_ENV` | `uat` (default) — `production` is hard-rejected by `getIciciConfig()` until explicitly re-enabled in code, which has not happened | |
+| `ICICI_ENV` | `uat` (default) or `production` — matched exactly, case-sensitively; no other value/casing is normalized | `production` additionally requires `ICICI_PRODUCTION_CONFIRM` (below) — see §4a. **Do not set `ICICI_ENV=production` in any real environment** — see §4a for why this remains unsafe to actually use right now, independent of it being code-supported. |
+| `ICICI_PRODUCTION_CONFIRM` | unset by default | The deliberate second gate for `ICICI_ENV=production` — see §4a. Leave unset. |
+| `ICICI_PROD_MERCHANT_ID` / `ICICI_PROD_AGGREGATOR_ID` / `ICICI_PROD_HASH_KEY` | unset by default | Real, bank-issued ICICI **production** credentials — entirely separate from the UAT ones above, never a fallback between the two. |
 | `ICICI_MERCHANT_ID` | UAT: `100000000007164` | |
 | `ICICI_AGGREGATOR_ID` | UAT: `A100000000007164` | |
 | `ICICI_HASH_KEY` | UAT hash key | **Secret. Never log, never commit, never expose.** |
@@ -56,7 +58,21 @@ Server-side only. Never set any of these as `VITE_*`/`NEXT_PUBLIC_*`/`PUBLIC_*`.
 | `SUPABASE_SECRET_KEY` | server-side DB access, bypasses RLS (current Supabase naming) | **Secret.** Primary; `SUPABASE_SERVICE_ROLE_KEY` (legacy JWT-format key) is read as a fallback only. |
 | `SUPABASE_URL` (or reuses `VITE_SUPABASE_URL`) | project URL (not secret) | **Project confirmed live** — see §6. |
 
-Production is disabled at the code level: `getIciciConfig()` throws if `ICICI_ENV=production`, independent of what URL/credentials happen to be configured. Additionally, `httpClient.ts`'s `assertIciciUatHost` refuses to call any hostname other than `pgpayuat.icicibank.com`, and explicitly recognizes and blocks the known production hostname `pgpay.icicibank.com` — this is a second, independent guard, not just a config check.
+## 4a. ICICI production support — code-complete, deliberately kept inert
+
+Production is now **supported in code** (separate `ICICI_PROD_*` credential variables, separate `pgpay.icicibank.com` endpoints, environment-aware host guard) but is **not ready to actually be used**, and is kept behind a second, independent gate on top of `ICICI_ENV=production` for exactly that reason:
+
+- `ICICI_ENV=production` alone is **not sufficient**. `getIciciConfig()` additionally requires `ICICI_PRODUCTION_CONFIRM` to equal the exact literal value in `ICICI_PRODUCTION_CONFIRMATION_VALUE` (`api/_lib/payments/icici/env.ts`) — otherwise it throws `IciciConfigError`, the same as a missing credential. This means a stray or copy-pasted `ICICI_ENV=production` in any environment can never silently enable real payments.
+- When both gates pass, credentials are read from `ICICI_PROD_MERCHANT_ID`/`ICICI_PROD_AGGREGATOR_ID`/`ICICI_PROD_HASH_KEY` — entirely separate variable names from the UAT ones, with no fallback in either direction, so UAT and production credentials can never be mixed up.
+- `httpClient.ts`'s host guard (`assertIciciHostMatchesEnvironment`) is now environment-aware: a UAT config can only ever reach `pgpayuat.icicibank.com`; a production config can only ever reach `pgpay.icicibank.com`; neither can ever reach the other's host, regardless of what URL a config happens to compute. A call site that omits the environment parameter defaults to `'uat'` — the restrictive choice.
+
+**Why production must still not actually be enabled**, independent of the code now supporting it:
+
+1. **The ₹2.00 fixed UAT test amount (§5) is still hardcoded and used unconditionally, regardless of environment.** Enabling production today, as-is, would charge every real customer exactly ₹2.00 instead of what they actually owe. This must be replaced with a real server-resolved amount *before* production is ever enabled — not after.
+2. **UAT itself has never been confirmed working end-to-end against the real bank** — the last live diagnostic against ICICI's own UAT gateway returned a bank-side `502` (see git history for the full diagnostic). No hash formula, callback, or STATUS check has ever been validated against an actual bank response.
+3. Real production credentials (`ICICI_PROD_MERCHANT_ID`/`ICICI_PROD_AGGREGATOR_ID`/`ICICI_PROD_HASH_KEY`) have not been provisioned in this environment.
+
+**`ICICI_PRODUCTION_CONFIRM` must remain unset until all three of the above are explicitly resolved and a human has made the deliberate decision to go live.**
 
 ## 3. Direct Orange PG Initiate Sale
 
@@ -89,7 +105,7 @@ Validated fields (`initiateSaleResponse.ts`): `responseCode`, `merchantId`, `agg
 
 **`R1000` means successful initiation only — never payment completion.** This is enforced structurally: the result type has no "payment success" field, only `initiationAccepted`, and the internal transaction status set on `R1000` is `INITIATED`, never `SUCCESS`.
 
-Before any redirect URL is handed to the frontend, `redirect.ts` independently re-validates it: must be a well-formed absolute URL, must use HTTPS, and must match the exact confirmed UAT hostname (`pgpayuat.icicibank.com`) — this catches a corrupted/hijacked response even if the `responseCode`/field checks above somehow passed. If this check fails, the transaction is marked `UNKNOWN` and no redirect URL is ever returned to the browser.
+Before any redirect URL is handed to the frontend, `redirect.ts` independently re-validates it: must be a well-formed absolute URL, must use HTTPS, and must match the hostname for the caller's own ICICI environment (`pgpayuat.icicibank.com` for UAT, `pgpay.icicibank.com` only for a production config — never the other) — this catches a corrupted/hijacked response even if the `responseCode`/field checks above somehow passed. If this check fails, the transaction is marked `UNKNOWN` and no redirect URL is ever returned to the browser.
 
 ## 5. Authoritative payment amount
 

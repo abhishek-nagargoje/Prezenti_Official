@@ -10,6 +10,17 @@
 
 export type IciciEnvironment = 'uat' | 'production';
 
+/**
+ * The exact, case-sensitive value `ICICI_PRODUCTION_CONFIRM` must equal
+ * for `ICICI_ENV=production` to actually take effect. This is a
+ * deliberate second gate: `ICICI_ENV=production` alone is never
+ * sufficient to enable real ICICI production payments — both variables
+ * must be set, on purpose, at the same time. Knowing this value alone
+ * grants no access (it is not a credential); it exists purely so a
+ * single stray/copied `ICICI_ENV=production` can never silently go live.
+ */
+export const ICICI_PRODUCTION_CONFIRMATION_VALUE = 'yes-enable-icici-production';
+
 export interface IciciConfig {
   environment: IciciEnvironment;
   merchantId: string;
@@ -38,33 +49,13 @@ function requireEnv(name: string): string {
 const UAT_DEFAULT_INITIATE_SALE_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale';
 const UAT_DEFAULT_COMMAND_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/command';
 const UAT_DEFAULT_SETTLEMENT_DETAILS_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/settlementDetails';
-const PROD_DEFAULT_INITIATE_SALE_URL = 'https://pgpay.icicibank.com/pg/api/v2/initiateSale';
-const PROD_DEFAULT_COMMAND_URL = 'https://pgpay.icicibank.com/pg/api/command';
+const PROD_DEFAULT_INITIATE_SALE_URL = 'https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale';
+const PROD_DEFAULT_COMMAND_URL = 'https://pgpay.icicibank.com/tsp/pg/api/command';
+const PROD_DEFAULT_SETTLEMENT_DETAILS_URL = 'https://pgpay.icicibank.com/tsp/pg/api/settlementDetails';
 
-/**
- * Loads and validates server-side ICICI configuration. Throws
- * `IciciConfigError` (naming only the missing variable, never any value)
- * if a required variable is absent. Does not memoize — callers needing
- * this repeatedly should cache the result themselves within a request.
- */
-export function getIciciConfig(): IciciConfig {
-  const environment = (process.env.ICICI_ENV ?? 'uat') as IciciEnvironment;
-  if (environment !== 'uat' && environment !== 'production') {
-    throw new IciciConfigError(`ICICI_ENV must be "uat" or "production"; received "${environment}".`);
-  }
-
-  // Production must never be reachable unless explicitly and deliberately
-  // configured — this integration has not been approved for production
-  // use yet (see docs/icici-orange-pg-integration.md §4).
-  if (environment === 'production') {
-    throw new IciciConfigError(
-      'ICICI_ENV=production is not enabled for this integration. Production credentials must not be used ' +
-        'until UAT is verified, the bank has confirmed UAT results, and production configuration is explicitly approved.',
-    );
-  }
-
+function getUatIciciConfig(): IciciConfig {
   return {
-    environment,
+    environment: 'uat',
     merchantId: requireEnv('ICICI_MERCHANT_ID'),
     aggregatorId: requireEnv('ICICI_AGGREGATOR_ID'),
     hashKey: requireEnv('ICICI_HASH_KEY'),
@@ -81,15 +72,77 @@ export function getIciciConfig(): IciciConfig {
   };
 }
 
-// Exported for documentation/tests only — not used to silently enable
-// production; getIciciConfig() above hard-rejects ICICI_ENV=production.
+/**
+ * Production credentials are read from entirely separate variable names
+ * (`ICICI_PROD_*`, never `ICICI_*`) — UAT and production are different
+ * bank-issued credentials and must never be able to collide or be
+ * silently reused across environments. `requireEnv` throwing here (e.g.
+ * because only UAT credentials happen to be configured) is the correct,
+ * fail-closed behavior, not a bug to work around.
+ */
+function getProductionIciciConfig(): IciciConfig {
+  const confirmation = process.env.ICICI_PRODUCTION_CONFIRM;
+  if (confirmation !== ICICI_PRODUCTION_CONFIRMATION_VALUE) {
+    throw new IciciConfigError(
+      'ICICI_ENV=production requires a second, deliberate confirmation variable (ICICI_PRODUCTION_CONFIRM) set to ' +
+        'the exact documented value. ICICI_ENV=production alone is never sufficient to enable real ICICI production ' +
+        'payments — see docs/icici-orange-pg-integration.md.',
+    );
+  }
+
+  return {
+    environment: 'production',
+    merchantId: requireEnv('ICICI_PROD_MERCHANT_ID'),
+    aggregatorId: requireEnv('ICICI_PROD_AGGREGATOR_ID'),
+    hashKey: requireEnv('ICICI_PROD_HASH_KEY'),
+    currencyCode: process.env.ICICI_CURRENCY_CODE ?? '356',
+    payType: process.env.ICICI_PAY_TYPE ?? '0',
+    transactionType: process.env.ICICI_TRANSACTION_TYPE ?? 'SALE',
+    initiateSaleUrl: process.env.ICICI_PROD_INITIATE_SALE_URL ?? PROD_DEFAULT_INITIATE_SALE_URL,
+    commandUrl: process.env.ICICI_PROD_COMMAND_URL ?? PROD_DEFAULT_COMMAND_URL,
+    settlementDetailsUrl: process.env.ICICI_PROD_SETTLEMENT_DETAILS_URL ?? PROD_DEFAULT_SETTLEMENT_DETAILS_URL,
+    returnUrl: requireEnv('ICICI_RETURN_URL'),
+  };
+}
+
+/**
+ * Loads and validates server-side ICICI configuration. Throws
+ * `IciciConfigError` (naming only the missing variable, never any value)
+ * if a required variable is absent. Does not memoize — callers needing
+ * this repeatedly should cache the result themselves within a request.
+ *
+ * `ICICI_ENV` is matched exactly and case-sensitively against `"uat"` or
+ * `"production"` — values like `"UAT"`/`"Production"`/`"PRODUCTION"` are
+ * intentionally NOT normalized and are rejected outright, so a
+ * differently-cased value can never silently fall through to either
+ * branch.
+ */
+export function getIciciConfig(): IciciConfig {
+  const environment = (process.env.ICICI_ENV ?? 'uat') as IciciEnvironment;
+  if (environment !== 'uat' && environment !== 'production') {
+    throw new IciciConfigError(
+      `ICICI_ENV must be exactly "uat" or "production" (case-sensitive, not normalized); received "${environment}".`,
+    );
+  }
+
+  return environment === 'production' ? getProductionIciciConfig() : getUatIciciConfig();
+}
+
+// Exported for documentation/tests — these are the real, live ICICI
+// production endpoints. They are only ever assigned to a config's
+// initiateSaleUrl/commandUrl/settlementDetailsUrl when getIciciConfig()
+// has already passed the ICICI_PRODUCTION_CONFIRM gate above.
 export const ICICI_PRODUCTION_DEFAULT_URLS = {
   initiateSaleUrl: PROD_DEFAULT_INITIATE_SALE_URL,
   commandUrl: PROD_DEFAULT_COMMAND_URL,
+  settlementDetailsUrl: PROD_DEFAULT_SETTLEMENT_DETAILS_URL,
 };
 
-/** The only hostname this integration is currently permitted to call. Used as a hard outbound guard. */
+/** The only hostname this integration is permitted to call while ICICI_ENV=uat. Used as a hard outbound guard. */
 export const ICICI_UAT_HOSTNAME = 'pgpayuat.icicibank.com';
 
-/** Every known ICICI production hostname — used to positively refuse an accidental production call. */
-export const ICICI_PRODUCTION_HOSTNAMES = ['pgpay.icicibank.com'];
+/** The only hostname this integration is permitted to call while ICICI_ENV=production (and only once the production-confirm gate has passed). */
+export const ICICI_PRODUCTION_HOSTNAME = 'pgpay.icicibank.com';
+
+/** Every known ICICI production hostname — used by the UAT-mode host guard to positively (and specifically) refuse an accidental production call, rather than reporting it as merely "unexpected". */
+export const ICICI_PRODUCTION_HOSTNAMES = [ICICI_PRODUCTION_HOSTNAME];

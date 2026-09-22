@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { getIciciConfig, IciciConfigError } from './env';
+import { getIciciConfig, IciciConfigError, ICICI_PRODUCTION_CONFIRMATION_VALUE } from './env';
 
 const ICICI_ENV_KEYS = [
   'ICICI_ENV',
@@ -13,6 +13,13 @@ const ICICI_ENV_KEYS = [
   'ICICI_UAT_COMMAND_URL',
   'ICICI_UAT_SETTLEMENT_DETAILS_URL',
   'ICICI_RETURN_URL',
+  'ICICI_PRODUCTION_CONFIRM',
+  'ICICI_PROD_MERCHANT_ID',
+  'ICICI_PROD_AGGREGATOR_ID',
+  'ICICI_PROD_HASH_KEY',
+  'ICICI_PROD_INITIATE_SALE_URL',
+  'ICICI_PROD_COMMAND_URL',
+  'ICICI_PROD_SETTLEMENT_DETAILS_URL',
 ] as const;
 
 function clearIciciEnv() {
@@ -62,15 +69,106 @@ describe('getIciciConfig', () => {
     expect(getIciciConfig().initiateSaleUrl).toBe('https://example.test/custom-initiate');
   });
 
-  it('rejects ICICI_ENV=production outright — production is not enabled for this integration', () => {
+  it('rejects ICICI_ENV=production without the ICICI_PRODUCTION_CONFIRM gate, even with valid ICICI_PROD_* credentials present', () => {
     clearIciciEnv();
     process.env.ICICI_ENV = 'production';
+    process.env.ICICI_PROD_MERCHANT_ID = 'prod-merchant';
+    process.env.ICICI_PROD_AGGREGATOR_ID = 'prod-aggregator';
+    process.env.ICICI_PROD_HASH_KEY = 'prod-key';
+    process.env.ICICI_RETURN_URL = 'https://example.test/return';
+    // ICICI_PRODUCTION_CONFIRM intentionally left unset.
+
+    expect(() => getIciciConfig()).toThrow(IciciConfigError);
+  });
+
+  it('rejects ICICI_ENV=production when ICICI_PRODUCTION_CONFIRM is set to the wrong value (no partial-credit matching)', () => {
+    clearIciciEnv();
+    process.env.ICICI_ENV = 'production';
+    process.env.ICICI_PRODUCTION_CONFIRM = 'yes'; // not the exact required value
+    process.env.ICICI_PROD_MERCHANT_ID = 'prod-merchant';
+    process.env.ICICI_PROD_AGGREGATOR_ID = 'prod-aggregator';
+    process.env.ICICI_PROD_HASH_KEY = 'prod-key';
+    process.env.ICICI_RETURN_URL = 'https://example.test/return';
+
+    expect(() => getIciciConfig()).toThrow(IciciConfigError);
+  });
+
+  it('still requires UAT-mode config for ICICI_ENV=uat to keep working exactly as before — production support never disturbs UAT', () => {
+    clearIciciEnv();
     process.env.ICICI_MERCHANT_ID = 'test-merchant';
     process.env.ICICI_AGGREGATOR_ID = 'test-aggregator';
     process.env.ICICI_HASH_KEY = 'test-key';
     process.env.ICICI_RETURN_URL = 'https://example.test/return';
 
-    expect(() => getIciciConfig()).toThrow(IciciConfigError);
+    const config = getIciciConfig();
+    expect(config.environment).toBe('uat');
+    expect(config.merchantId).toBe('test-merchant');
+  });
+
+  describe('ICICI_ENV=production, correctly and deliberately enabled', () => {
+    function setValidProductionCredentials() {
+      process.env.ICICI_ENV = 'production';
+      process.env.ICICI_PRODUCTION_CONFIRM = ICICI_PRODUCTION_CONFIRMATION_VALUE;
+      process.env.ICICI_PROD_MERCHANT_ID = 'prod-merchant';
+      process.env.ICICI_PROD_AGGREGATOR_ID = 'prod-aggregator';
+      process.env.ICICI_PROD_HASH_KEY = 'prod-key';
+      process.env.ICICI_RETURN_URL = 'https://www.prezenti.com/api/payments/icici/return';
+    }
+
+    it('succeeds and resolves the real ICICI production endpoints', () => {
+      clearIciciEnv();
+      setValidProductionCredentials();
+
+      const config = getIciciConfig();
+      expect(config.environment).toBe('production');
+      expect(config.merchantId).toBe('prod-merchant');
+      expect(config.aggregatorId).toBe('prod-aggregator');
+      expect(config.hashKey).toBe('prod-key');
+      expect(config.initiateSaleUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale');
+      expect(config.commandUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/command');
+      expect(config.settlementDetailsUrl).toBe('https://pgpay.icicibank.com/tsp/pg/api/settlementDetails');
+    });
+
+    it('never falls back to UAT credentials (ICICI_MERCHANT_ID etc.) even if they happen to also be set', () => {
+      clearIciciEnv();
+      setValidProductionCredentials();
+      process.env.ICICI_MERCHANT_ID = 'uat-merchant-should-never-be-used';
+
+      expect(getIciciConfig().merchantId).toBe('prod-merchant');
+    });
+
+    it('still throws, naming only the missing ICICI_PROD_* variable, when a production credential is absent', () => {
+      clearIciciEnv();
+      process.env.ICICI_ENV = 'production';
+      process.env.ICICI_PRODUCTION_CONFIRM = ICICI_PRODUCTION_CONFIRMATION_VALUE;
+      process.env.ICICI_PROD_AGGREGATOR_ID = 'prod-aggregator';
+      process.env.ICICI_PROD_HASH_KEY = 'prod-key';
+      process.env.ICICI_RETURN_URL = 'https://example.test/return';
+      // ICICI_PROD_MERCHANT_ID intentionally left unset.
+
+      try {
+        getIciciConfig();
+        expect.unreachable('expected getIciciConfig to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(IciciConfigError);
+        expect((error as Error).message).toContain('ICICI_PROD_MERCHANT_ID');
+      }
+    });
+  });
+
+  describe('ICICI_ENV is matched exactly — case is never normalized', () => {
+    for (const badValue of ['Production', 'PRODUCTION', 'UAT', 'Uat']) {
+      it(`rejects ICICI_ENV="${badValue}" rather than silently treating it as either valid value`, () => {
+        clearIciciEnv();
+        process.env.ICICI_ENV = badValue;
+        process.env.ICICI_MERCHANT_ID = 'test-merchant';
+        process.env.ICICI_AGGREGATOR_ID = 'test-aggregator';
+        process.env.ICICI_HASH_KEY = 'test-key';
+        process.env.ICICI_RETURN_URL = 'https://example.test/return';
+
+        expect(() => getIciciConfig()).toThrow(IciciConfigError);
+      });
+    }
   });
 
   it('never includes the hash key value in a thrown error message', () => {

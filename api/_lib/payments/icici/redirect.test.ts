@@ -29,10 +29,25 @@ describe('buildIciciRedirectUrl', () => {
     expect(() => buildIciciRedirectUrl('https://evil.example.com/page', 'ctx')).toThrow(IciciUnsafeRedirectError);
   });
 
-  it('rejects the real ICICI production host — only UAT is permitted', () => {
-    expect(() => buildIciciRedirectUrl('https://pgpay.icicibank.com/pg/somepage', 'ctx')).toThrow(
+  it('rejects the real ICICI production host under the default (UAT) environment', () => {
+    expect(() => buildIciciRedirectUrl('https://pgpay.icicibank.com/tsp/pg/somepage', 'ctx')).toThrow(
       IciciUnsafeRedirectError,
     );
+  });
+
+  it('rejects the real ICICI production host under an explicit environment="uat"', () => {
+    expect(() => buildIciciRedirectUrl('https://pgpay.icicibank.com/tsp/pg/somepage', 'ctx', 'uat')).toThrow(
+      IciciUnsafeRedirectError,
+    );
+  });
+
+  it('accepts the real ICICI production host under environment="production"', () => {
+    const result = buildIciciRedirectUrl('https://pgpay.icicibank.com/tsp/pg/somepage', 'ctx-prod', 'production');
+    expect(result).toBe('https://pgpay.icicibank.com/tsp/pg/somepage?tranCtx=ctx-prod');
+  });
+
+  it('rejects the UAT host under environment="production" — the two can never be mixed', () => {
+    expect(() => buildIciciRedirectUrl(VALID_REDIRECT, 'ctx', 'production')).toThrow(IciciUnsafeRedirectError);
   });
 
   it('rejects a malformed URL', () => {

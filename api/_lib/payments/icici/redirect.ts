@@ -10,17 +10,22 @@
  * handed to the frontend:
  * - redirectURI must be a well-formed absolute URL
  * - must use HTTPS
- * - must belong to the confirmed ICICI UAT hostname (ICICI_UAT_HOSTNAME)
+ * - must belong to the hostname that matches the CALLER'S OWN environment
+ *   (the UAT hostname for a UAT config, the production hostname only for
+ *   a production config) — never the other, and never anything else.
+ *   `environment` defaults to `'uat'`, the restrictive choice, so a call
+ *   site that forgets to pass it can never accidentally accept a
+ *   production-hosted redirect.
  * - the caller only ever passes redirectURI/tranCtx that came from an
  *   already-validated ICICI response (see initiateSaleResponse.ts) —
  *   this function never accepts anything derived from browser input.
  */
 
-import { ICICI_UAT_HOSTNAME } from './env';
+import { ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env';
 
 export class IciciUnsafeRedirectError extends Error {}
 
-export function buildIciciRedirectUrl(redirectURI: string, tranCtx: string): string {
+export function buildIciciRedirectUrl(redirectURI: string, tranCtx: string, environment: IciciEnvironment = 'uat'): string {
   let url: URL;
   try {
     url = new URL(redirectURI);
@@ -32,9 +37,11 @@ export function buildIciciRedirectUrl(redirectURI: string, tranCtx: string): str
     throw new IciciUnsafeRedirectError(`redirectURI must use HTTPS; received protocol "${url.protocol}"`);
   }
 
-  if (url.hostname !== ICICI_UAT_HOSTNAME) {
+  const expectedHostname = environment === 'production' ? ICICI_PRODUCTION_HOSTNAME : ICICI_UAT_HOSTNAME;
+
+  if (url.hostname !== expectedHostname) {
     throw new IciciUnsafeRedirectError(
-      `redirectURI host "${url.hostname}" does not match the expected ICICI UAT host "${ICICI_UAT_HOSTNAME}"`,
+      `redirectURI host "${url.hostname}" does not match the expected ICICI host "${expectedHostname}" for environment "${environment}"`,
     );
   }
 

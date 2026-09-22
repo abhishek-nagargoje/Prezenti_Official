@@ -118,6 +118,7 @@ describe('buildIciciStatusRequestBody', () => {
 });
 
 const CONFIG = {
+  environment: 'uat' as const,
   merchantId: '100000000007164',
   aggregatorId: 'A100000000007164',
   hashKey: TEST_KEY,

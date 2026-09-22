@@ -1,11 +1,17 @@
 /**
  * Outbound HTTP client for calling ICICI. Isolated so it is the single
- * place actual network I/O happens, and the single place the UAT-only
- * safety guard lives — every call, regardless of caller, is checked
- * against the UAT hostname before any request leaves the process.
+ * place actual network I/O happens, and the single place the
+ * environment/hostname safety guard lives — every call, regardless of
+ * caller, is checked against the hostname that matches the *caller's own
+ * declared environment* before any request leaves the process. A UAT
+ * config can only ever reach the UAT host; a production config can only
+ * ever reach the production host — never the other, and never anything
+ * else. Callers that omit `environment` default to `'uat'`, the
+ * restrictive choice, so a call site that forgets to pass it can never
+ * accidentally permit a production call.
  */
 
-import { ICICI_PRODUCTION_HOSTNAMES, ICICI_UAT_HOSTNAME } from './env';
+import { ICICI_PRODUCTION_HOSTNAMES, ICICI_PRODUCTION_HOSTNAME, ICICI_UAT_HOSTNAME, type IciciEnvironment } from './env';
 import type { IciciInitiateSaleRequestBody } from './requestBuilder';
 import type { IciciInitiateSaleResponse } from './initiateSaleResponse';
 import type { IciciStatusCheckResponse } from './statusCheck';
@@ -22,31 +28,42 @@ export class IciciRequestTimeoutError extends Error {
 export class IciciProductionCallBlockedError extends Error {
   constructor(hostname: string) {
     super(
-      `Refused to call "${hostname}": this integration is only permitted to call the UAT host ` +
-        `"${ICICI_UAT_HOSTNAME}". Production calls are not enabled (see docs/icici-orange-pg-integration.md §4).`,
+      `Refused to call "${hostname}": the current ICICI environment is "uat", which is only permitted to call ` +
+        `the UAT host "${ICICI_UAT_HOSTNAME}". This call would have reached ICICI's production host instead — ` +
+        `blocked outright rather than assuming that was intentional.`,
     );
   }
 }
 
 export class IciciUnexpectedHostError extends Error {
-  constructor(hostname: string) {
-    super(
-      `Refused to call "${hostname}": only the UAT host "${ICICI_UAT_HOSTNAME}" is currently permitted.`,
-    );
+  constructor(hostname: string, environment: IciciEnvironment) {
+    const expected = environment === 'production' ? ICICI_PRODUCTION_HOSTNAME : ICICI_UAT_HOSTNAME;
+    super(`Refused to call "${hostname}": only "${expected}" is permitted while ICICI_ENV=${environment}.`);
   }
 }
 
-/** Throws if `url` is not exactly the permitted UAT hostname. This is the hard guard against an accidental production call. */
-export function assertIciciUatHost(url: string): void {
+/**
+ * Throws unless `url`'s hostname is exactly the one hostname permitted
+ * for `environment` — the UAT host while `environment === 'uat'`, the
+ * production host only while `environment === 'production'`. This is the
+ * hard guard against ever reaching the wrong ICICI environment,
+ * regardless of what URL a config/caller happens to compute.
+ */
+export function assertIciciHostMatchesEnvironment(url: string, environment: IciciEnvironment): void {
   const hostname = new URL(url).hostname;
+
+  if (environment === 'production') {
+    if (hostname === ICICI_PRODUCTION_HOSTNAME) return;
+    throw new IciciUnexpectedHostError(hostname, environment);
+  }
+
+  if (hostname === ICICI_UAT_HOSTNAME) return;
 
   if (ICICI_PRODUCTION_HOSTNAMES.includes(hostname)) {
     throw new IciciProductionCallBlockedError(hostname);
   }
 
-  if (hostname !== ICICI_UAT_HOSTNAME) {
-    throw new IciciUnexpectedHostError(hostname);
-  }
+  throw new IciciUnexpectedHostError(hostname, environment);
 }
 
 export interface IciciInitiateSaleHttpResult {
@@ -70,8 +87,9 @@ export async function postIciciInitiateSale(
   requestBody: IciciInitiateSaleRequestBody,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+  environment: IciciEnvironment = 'uat',
 ): Promise<IciciInitiateSaleHttpResult> {
-  assertIciciUatHost(url);
+  assertIciciHostMatchesEnvironment(url, environment);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -126,8 +144,9 @@ export async function postIciciCommand(
   fields: Record<string, string>,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+  environment: IciciEnvironment = 'uat',
 ): Promise<IciciCommandHttpResult> {
-  assertIciciUatHost(url);
+  assertIciciHostMatchesEnvironment(url, environment);
 
   const body = new URLSearchParams(fields).toString();
 

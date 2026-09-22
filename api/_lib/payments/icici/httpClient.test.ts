@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ICICI_PRODUCTION_DEFAULT_URLS } from './env';
+import { ICICI_PRODUCTION_DEFAULT_URLS, ICICI_UAT_HOSTNAME } from './env';
 import {
-  assertIciciUatHost,
+  assertIciciHostMatchesEnvironment,
   IciciProductionCallBlockedError,
   IciciRequestTimeoutError,
   IciciUnexpectedHostError,
@@ -9,6 +9,8 @@ import {
   postIciciInitiateSale,
 } from './httpClient';
 import type { IciciInitiateSaleRequestBody } from './requestBuilder';
+
+const UAT_INITIATE_SALE_URL = 'https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale';
 
 const SAMPLE_BODY: IciciInitiateSaleRequestBody = {
   merchantId: '100000000007164',
@@ -28,19 +30,41 @@ const SAMPLE_BODY: IciciInitiateSaleRequestBody = {
   secureHash: 'deadbeef',
 };
 
-describe('assertIciciUatHost', () => {
-  it('allows the UAT host', () => {
-    expect(() => assertIciciUatHost('https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale')).not.toThrow();
+describe('assertIciciHostMatchesEnvironment', () => {
+  it('ICICI UAT host => allowed under environment "uat"', () => {
+    expect(() => assertIciciHostMatchesEnvironment(UAT_INITIATE_SALE_URL, 'uat')).not.toThrow();
   });
 
-  it('blocks the known production host explicitly', () => {
-    expect(() => assertIciciUatHost(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl)).toThrow(
+  it('ICICI Production host => rejected under environment "uat" (blocked explicitly, not just "unexpected")', () => {
+    expect(() => assertIciciHostMatchesEnvironment(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl, 'uat')).toThrow(
       IciciProductionCallBlockedError,
     );
   });
 
-  it('blocks any other unrecognized host', () => {
-    expect(() => assertIciciUatHost('https://evil.example.com/initiateSale')).toThrow(IciciUnexpectedHostError);
+  it('ICICI Production host => allowed under environment "production"', () => {
+    expect(() =>
+      assertIciciHostMatchesEnvironment(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl, 'production'),
+    ).not.toThrow();
+  });
+
+  it('ICICI UAT host => rejected under environment "production" (never mixed, in either direction)', () => {
+    expect(() => assertIciciHostMatchesEnvironment(UAT_INITIATE_SALE_URL, 'production')).toThrow(
+      IciciUnexpectedHostError,
+    );
+  });
+
+  it('blocks any other unrecognized host regardless of environment', () => {
+    expect(() => assertIciciHostMatchesEnvironment('https://evil.example.com/initiateSale', 'uat')).toThrow(
+      IciciUnexpectedHostError,
+    );
+    expect(() => assertIciciHostMatchesEnvironment('https://evil.example.com/initiateSale', 'production')).toThrow(
+      IciciUnexpectedHostError,
+    );
+  });
+
+  it('confirms the two hostnames are actually distinct (a meaningless test if they were ever accidentally equal)', () => {
+    expect(ICICI_UAT_HOSTNAME).not.toBe(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl);
+    expect(new URL(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl).hostname).not.toBe(ICICI_UAT_HOSTNAME);
   });
 });
 
@@ -106,6 +130,57 @@ describe('postIciciInitiateSale', () => {
       ),
     ).rejects.toThrow(IciciRequestTimeoutError);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to environment "uat" when omitted — a call site that forgets the parameter can never accidentally reach production', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      postIciciInitiateSale(ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl, SAMPLE_BODY, fetchImpl as unknown as typeof fetch),
+    ).rejects.toThrow(IciciProductionCallBlockedError);
+  });
+
+  it('Production website + ICICI Production (environment="production" explicitly passed) => allowed to reach the production host', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ responseCode: 'R1000', redirectURI: 'https://x', tranCtx: 'ctx' }),
+    });
+
+    const result = await postIciciInitiateSale(
+      ICICI_PRODUCTION_DEFAULT_URLS.initiateSaleUrl,
+      SAMPLE_BODY,
+      fetchImpl as unknown as typeof fetch,
+      undefined,
+      'production',
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.httpStatus).toBe(200);
+  });
+
+  it('Production website + ICICI UAT (environment="uat" explicitly passed) => allowed to reach the UAT host', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      status: 200,
+      text: async () => JSON.stringify({ responseCode: 'R1000', redirectURI: 'https://x', tranCtx: 'ctx' }),
+    });
+
+    const result = await postIciciInitiateSale(
+      UAT_INITIATE_SALE_URL,
+      SAMPLE_BODY,
+      fetchImpl as unknown as typeof fetch,
+      undefined,
+      'uat',
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.httpStatus).toBe(200);
+  });
+
+  it('rejects the UAT host even when environment="production" is explicitly passed — the two can never be mixed', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      postIciciInitiateSale(UAT_INITIATE_SALE_URL, SAMPLE_BODY, fetchImpl as unknown as typeof fetch, undefined, 'production'),
+    ).rejects.toThrow(IciciUnexpectedHostError);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

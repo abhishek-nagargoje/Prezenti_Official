@@ -136,7 +136,7 @@ export interface IciciStatusCheckResult {
 export async function checkIciciTransactionStatus(
   originalTxnNo: string,
   merchantTxnNo: string,
-  config: Pick<IciciConfig, 'merchantId' | 'aggregatorId' | 'hashKey' | 'commandUrl'>,
+  config: Pick<IciciConfig, 'merchantId' | 'aggregatorId' | 'hashKey' | 'commandUrl' | 'environment'>,
   fetchImpl?: typeof fetch,
 ): Promise<IciciStatusCheckResult> {
   const fields: IciciStatusCheckRequestFields = {
@@ -151,7 +151,7 @@ export async function checkIciciTransactionStatus(
 
   let httpResult;
   try {
-    httpResult = await postIciciCommand(config.commandUrl, requestBody, fetchImpl);
+    httpResult = await postIciciCommand(config.commandUrl, requestBody, fetchImpl, undefined, config.environment);
   } catch (error) {
     if (error instanceof IciciRequestTimeoutError) {
       return { outcome: 'TIMEOUT', status: 'UNKNOWN', merchantTxnNo };

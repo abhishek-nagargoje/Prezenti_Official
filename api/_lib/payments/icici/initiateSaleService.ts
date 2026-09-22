@@ -156,7 +156,13 @@ export async function initiateIciciPayment(
 
   let httpResult;
   try {
-    httpResult = await postIciciInitiateSale(deps.config.initiateSaleUrl, requestBody, deps.fetchImpl);
+    httpResult = await postIciciInitiateSale(
+      deps.config.initiateSaleUrl,
+      requestBody,
+      deps.fetchImpl,
+      undefined,
+      deps.config.environment,
+    );
   } catch (error) {
     // Any network/transport-level failure calling ICICI itself — DNS,
     // TLS, connection reset/refused, our own request timeout, or the
@@ -227,7 +233,7 @@ export async function initiateIciciPayment(
   // that isn't a genuine HTTPS UAT redirect target.
   let safeRedirectUrl: string;
   try {
-    safeRedirectUrl = buildIciciRedirectUrl(validation.redirectURI!, validation.tranCtx!);
+    safeRedirectUrl = buildIciciRedirectUrl(validation.redirectURI!, validation.tranCtx!, deps.config.environment);
   } catch (error) {
     const reason = error instanceof IciciUnsafeRedirectError ? error.message : 'unknown redirect validation error';
     await recordOutcomeSafely(deps, {

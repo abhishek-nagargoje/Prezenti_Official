@@ -216,4 +216,84 @@ describe('initiateIciciPayment', () => {
       expect(result.safeResult.redirectURI).toBeDefined();
     });
   });
+
+  describe('a production-environment config end to end', () => {
+    const PRODUCTION_CONFIG: IciciConfig = {
+      environment: 'production',
+      merchantId: 'prod-merchant',
+      aggregatorId: 'prod-aggregator',
+      hashKey: 'prod-fixture-key-not-a-real-secret',
+      currencyCode: '356',
+      payType: '0',
+      transactionType: 'SALE',
+      initiateSaleUrl: 'https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale',
+      commandUrl: 'https://pgpay.icicibank.com/tsp/pg/api/command',
+      settlementDetailsUrl: 'https://pgpay.icicibank.com/tsp/pg/api/settlementDetails',
+      returnUrl: 'https://www.prezenti.com/api/payments/icici/return',
+    };
+
+    function acceptedProductionJsonFetch() {
+      return vi.fn().mockImplementation(async (_url: string, init: { body: string }) => {
+        const sentBody = JSON.parse(init.body) as { merchantTxnNo: string };
+        return {
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              responseCode: 'R1000',
+              merchantId: PRODUCTION_CONFIG.merchantId,
+              aggregatorID: PRODUCTION_CONFIG.aggregatorId,
+              merchantTxnNo: sentBody.merchantTxnNo,
+              redirectURI: 'https://pgpay.icicibank.com/tsp/pg/somepage',
+              tranCtx: 'ctx-prod-abc',
+            }),
+        };
+      });
+    }
+
+    it('reaches the production host and returns a valid production redirect when config.environment is "production"', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = acceptedProductionJsonFetch();
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: PRODUCTION_CONFIG, repository, fetchImpl });
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls[0][0]).toBe('https://pgpay.icicibank.com/tsp/pg/api/v2/initiateSale');
+      expect(result.safeResult.success).toBe(true);
+      expect(result.safeResult.redirectURI).toBe('https://pgpay.icicibank.com/tsp/pg/somepage?tranCtx=ctx-prod-abc');
+    });
+
+    it('never returns the production hash key in the safe result or preview', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = acceptedProductionJsonFetch();
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: PRODUCTION_CONFIG, repository, fetchImpl });
+
+      expect(JSON.stringify(result.safeResult)).not.toContain(PRODUCTION_CONFIG.hashKey);
+      expect(JSON.stringify(result.preview)).not.toContain(PRODUCTION_CONFIG.hashKey);
+    });
+
+    it('rejects (never redirects) if a production config somehow receives a UAT-hosted redirectURI', async () => {
+      const repository = createFakeRepository();
+      const fetchImpl = vi.fn().mockImplementation(async (_url: string, init: { body: string }) => {
+        const sentBody = JSON.parse(init.body) as { merchantTxnNo: string };
+        return {
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              responseCode: 'R1000',
+              merchantId: PRODUCTION_CONFIG.merchantId,
+              aggregatorID: PRODUCTION_CONFIG.aggregatorId,
+              merchantTxnNo: sentBody.merchantTxnNo,
+              redirectURI: 'https://pgpayuat.icicibank.com/tsp/pg/somepage',
+              tranCtx: 'ctx-prod-abc',
+            }),
+        };
+      });
+
+      const result = await initiateIciciPayment(VALID_INPUT, { config: PRODUCTION_CONFIG, repository, fetchImpl });
+
+      expect(result.safeResult.success).toBe(false);
+      expect(result.safeResult.redirectURI).toBeUndefined();
+    });
+  });
 });
