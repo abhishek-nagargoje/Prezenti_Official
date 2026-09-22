@@ -1,50 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, CheckCircle2, CreditCard, PhoneCall, ShieldAlert, XCircle } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import { CreditCard, PhoneCall, ShieldAlert, XCircle } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { cn } from '../lib/cn';
 import { QuoteSummaryPanel } from '../components/inquiry/QuoteSummaryPanel';
 import { CallbackRequestPanel, CallbackSuccessState } from '../components/inquiry/CallbackRequestPanel';
-import { clearQuoteDraft, loadQuoteDraft, type QuoteDraft } from '../modules/inquiry/quoteTypes';
-import { sendExpertInquiry } from '../services/inquiryApi';
+import { loadQuoteDraft, type QuoteDraft } from '../modules/inquiry/quoteTypes';
+import { initiatePayment } from '../services/paymentApi';
 import { SEO } from '../seo/SEO';
 
-type PaymentView = 'form' | 'processing' | 'success' | 'failure' | 'callback' | 'callback-success';
-
-interface CardFields {
-  name: string;
-  number: string;
-  expiry: string;
-  cvv: string;
-}
-
-const emptyCard: CardFields = { name: '', number: '', expiry: '', cvv: '' };
-const cardFieldOrder: Array<keyof CardFields> = ['name', 'number', 'expiry', 'cvv'];
-
-function formatCardNumber(value: string) {
-  return value.replace(/\D/g, '').slice(0, 16);
-}
-
-function formatExpiry(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 4);
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-}
-
-function isExpiryValidAndFuture(value: string) {
-  const match = /^(\d{2})\/(\d{2})$/.exec(value);
-  if (!match) return false;
-
-  const month = Number(match[1]);
-  const year = Number(`20${match[2]}`);
-  if (month < 1 || month > 12) return false;
-
-  const now = new Date();
-  const expiryEnd = new Date(year, month, 0, 23, 59, 59);
-  return expiryEnd >= now;
-}
+type PaymentView = 'form' | 'processing' | 'failure' | 'callback' | 'callback-success';
 
 function MissingQuoteState() {
   return (
@@ -63,18 +29,13 @@ function MissingQuoteState() {
 
 export function PaymentDemoPage() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const formId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   const quoteId = (location.state as { quoteId?: string } | null)?.quoteId;
   const [quote] = useState<QuoteDraft | null>(() => loadQuoteDraft(quoteId));
 
   const [view, setView] = useState<PaymentView>('form');
-  const [card, setCard] = useState<CardFields>(emptyCard);
-  const [errors, setErrors] = useState<Partial<Record<keyof CardFields, string>>>({});
   const [failureReason, setFailureReason] = useState<string | null>(null);
-  const [notifyError, setNotifyError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -102,96 +63,52 @@ export function PaymentDemoPage() {
     );
   }
 
-  const update = (key: keyof CardFields, value: string) => {
-    setCard((current) => ({ ...current, [key]: value }));
-    setErrors((current) => ({ ...current, [key]: undefined }));
-  };
-
-  const validateCard = () => {
-    const nextErrors: Partial<Record<keyof CardFields, string>> = {};
-
-    if (card.name.trim().length < 2) {
-      nextErrors.name = 'Enter the name on card.';
-    }
-    if (card.number.replace(/\D/g, '').length !== 16) {
-      nextErrors.number = 'Enter a 16-digit card number.';
-    }
-    if (!isExpiryValidAndFuture(card.expiry)) {
-      nextErrors.expiry = 'Enter a valid future expiry (MM/YY).';
-    }
-    if (!/^\d{3,4}$/.test(card.cvv)) {
-      nextErrors.cvv = 'Enter a valid CVV.';
-    }
-
-    setErrors(nextErrors);
-    return nextErrors;
-  };
-
-  const notifyTeam = async () => {
-    try {
-      await sendExpertInquiry(quote.customer, '', {
-        requestType: 'PAYMENT_CONFIRMATION',
-        quoteId: quote.quoteId,
-      });
-      setNotifyError(null);
-    } catch (error) {
-      // The demo payment already "succeeded" from the customer's point of
-      // view; a failed team notification shouldn't block that confirmation,
-      // but the team may not have been alerted, so we surface it quietly.
-      setNotifyError(error instanceof Error ? error.message : 'Unable to notify our team automatically.');
-    }
-  };
-
-  const submitPayment = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitPayment = async () => {
     if (isSubmitting) return;
-
-    const nextErrors = validateCard();
-    const firstInvalidKey = cardFieldOrder.find((key) => nextErrors[key]);
-
-    if (firstInvalidKey) {
-      toast.error('Please correct the highlighted card details.');
-      document.getElementById(`${formId}-${firstInvalidKey}`)?.focus();
-      return;
-    }
 
     setIsSubmitting(true);
     setView('processing');
 
-    // Simulated gateway latency — no network call is made with card data.
-    await new Promise((resolve) => window.setTimeout(resolve, 1400));
+    try {
+      const result = await initiatePayment({
+        internalReference: quote.quoteId,
+        customerEmailID: quote.customer.email,
+        customerMobileNo: quote.customer.mobileNumber,
+        customerName: quote.customer.fullName,
+      });
 
-    const normalizedNumber = card.number.replace(/\D/g, '');
-    // Demo-only test card: ending in 0002 deterministically simulates a
-    // declined payment, mirroring common test-gateway conventions, so the
-    // failure/retry path can be exercised without randomness.
-    const shouldFail = normalizedNumber.endsWith('0002');
+      if (result.success && result.redirectURI) {
+        // The backend guarantees this is a validated HTTPS URL on the
+        // correct ICICI UAT host with tranCtx appended — hand off with a
+        // plain top-level navigation, no client-side rewriting.
+        window.location.href = result.redirectURI;
+        return;
+      }
 
-    if (shouldFail) {
-      setFailureReason('Your demo card was declined by the test gateway.');
+      setFailureReason(result.message || 'We could not start your payment. Please try again or ask our team to call you.');
       setView('failure');
       setIsSubmitting(false);
-      return;
+    } catch (error) {
+      setFailureReason(
+        error instanceof Error ? error.message : 'We could not start your payment. Please try again or ask our team to call you.',
+      );
+      setView('failure');
+      setIsSubmitting(false);
     }
-
-    await notifyTeam();
-    clearQuoteDraft(quote.quoteId);
-    setView('success');
-    setIsSubmitting(false);
   };
 
   return (
     <>
       <SEO
-        title="Demo Payment | Kargar"
-        description="Complete a demo payment for your Kargar service quote. Test mode only — no real payment is processed."
+        title="Payment | Kargar"
+        description="Complete your Kargar service payment securely via ICICI's UAT test payment gateway."
         canonicalUrl="/payment-demo"
       />
       <main className="bg-canvas pt-24 pb-14 sm:pt-28 lg:pb-20">
         <section className="mx-auto max-w-3xl px-4 sm:px-6">
           <div className="mb-5 flex items-center justify-center gap-2 rounded-full border border-warning-200 bg-warning-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-warning-700">
             <ShieldAlert size={14} aria-hidden="true" />
-            Test Mode &mdash; Demo Payment, No Real Charge
+            UAT Test Mode &mdash; Connecting to ICICI's Secure Payment Page
           </div>
 
           {view === 'callback' && (
@@ -213,11 +130,11 @@ export function PaymentDemoPage() {
                 </span>
                 <div>
                   <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight text-neutral-950 outline-none">
-                    Demo Payment
+                    Complete Your Payment
                   </h1>
                   <p className="mt-2 max-w-xl text-sm leading-6 text-neutral-600">
-                    This is a temporary verification page. No real payment gateway is connected and card details are never
-                    stored or transmitted.
+                    You'll be redirected to ICICI's secure payment page to complete this transaction. Prezenti never
+                    collects or stores your card, expiry, or CVV details.
                   </p>
                 </div>
               </div>
@@ -226,126 +143,25 @@ export function PaymentDemoPage() {
                 <QuoteSummaryPanel quote={quote} headingLevel="h2" />
               </div>
 
-              <form onSubmit={submitPayment} aria-busy={view === 'processing'} className="mt-7 grid gap-5">
-                <label className="block text-sm font-semibold text-neutral-800" htmlFor={`${formId}-name`}>
-                  Name on Card
-                  <input
-                    id={`${formId}-name`}
-                    type="text"
-                    autoComplete="cc-name"
-                    value={card.name}
-                    onChange={(event) => update('name', event.target.value)}
-                    disabled={view === 'processing'}
-                    className="mt-2 w-full rounded-[14px] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-950 outline-none transition focus:border-success-500 focus:ring-2 focus:ring-success-500/15 disabled:bg-neutral-50"
-                    placeholder="As printed on card"
-                    aria-invalid={Boolean(errors.name)}
-                    aria-describedby={errors.name ? `${formId}-name-error` : undefined}
-                  />
-                  {errors.name && <p id={`${formId}-name-error`} className="mt-1.5 text-xs font-semibold text-critical-600">{errors.name}</p>}
-                </label>
-
-                <label className="block text-sm font-semibold text-neutral-800" htmlFor={`${formId}-number`}>
-                  Card Number (Demo)
-                  <input
-                    id={`${formId}-number`}
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={card.number}
-                    onChange={(event) => update('number', formatCardNumber(event.target.value))}
-                    disabled={view === 'processing'}
-                    className="mt-2 w-full rounded-[14px] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-950 outline-none transition focus:border-success-500 focus:ring-2 focus:ring-success-500/15 disabled:bg-neutral-50"
-                    placeholder="4111 1111 1111 1111"
-                    aria-invalid={Boolean(errors.number)}
-                    aria-describedby={[`${formId}-number-hint`, errors.number ? `${formId}-number-error` : ''].filter(Boolean).join(' ')}
-                  />
-                  <span id={`${formId}-number-hint`} className="mt-1 block text-xs text-neutral-400">
-                    Demo only &mdash; any 16-digit number works. Ends in 0002 to test a declined payment.
-                  </span>
-                  {errors.number && <p id={`${formId}-number-error`} className="mt-1 text-xs font-semibold text-critical-600">{errors.number}</p>}
-                </label>
-
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <label className="block text-sm font-semibold text-neutral-800" htmlFor={`${formId}-expiry`}>
-                    Expiry (MM/YY)
-                    <input
-                      id={`${formId}-expiry`}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={card.expiry}
-                      onChange={(event) => update('expiry', formatExpiry(event.target.value))}
-                      disabled={view === 'processing'}
-                      className="mt-2 w-full rounded-[14px] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-950 outline-none transition focus:border-success-500 focus:ring-2 focus:ring-success-500/15 disabled:bg-neutral-50"
-                      placeholder="12/28"
-                      aria-invalid={Boolean(errors.expiry)}
-                      aria-describedby={errors.expiry ? `${formId}-expiry-error` : undefined}
-                    />
-                    {errors.expiry && <p id={`${formId}-expiry-error`} className="mt-1.5 text-xs font-semibold text-critical-600">{errors.expiry}</p>}
-                  </label>
-
-                  <label className="block text-sm font-semibold text-neutral-800" htmlFor={`${formId}-cvv`}>
-                    CVV
-                    <input
-                      id={`${formId}-cvv`}
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={card.cvv}
-                      onChange={(event) => update('cvv', event.target.value.replace(/\D/g, '').slice(0, 4))}
-                      disabled={view === 'processing'}
-                      className="mt-2 w-full rounded-[14px] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-950 outline-none transition focus:border-success-500 focus:ring-2 focus:ring-success-500/15 disabled:bg-neutral-50"
-                      placeholder="123"
-                      aria-invalid={Boolean(errors.cvv)}
-                      aria-describedby={errors.cvv ? `${formId}-cvv-error` : undefined}
-                    />
-                    {errors.cvv && <p id={`${formId}-cvv-error`} className="mt-1.5 text-xs font-semibold text-critical-600">{errors.cvv}</p>}
-                  </label>
-                </div>
-
+              <div aria-busy={view === 'processing'} className="mt-7 grid gap-5">
                 <span role="status" aria-live="polite" className="sr-only">
-                  {view === 'processing' ? 'Processing your payment, please wait.' : ''}
+                  {view === 'processing' ? 'Connecting to the secure payment gateway, please wait.' : ''}
                 </span>
 
-                <Button type="submit" variant="primary" size="xl" className="mt-2 w-full" isLoading={view === 'processing'} disabled={view === 'processing'}>
-                  {view === 'processing' ? 'Processing payment' : 'Pay Now (Demo)'}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="xl"
+                  className="mt-2 w-full"
+                  isLoading={view === 'processing'}
+                  disabled={view === 'processing'}
+                  onClick={submitPayment}
+                >
+                  {view === 'processing' ? 'Connecting to payment gateway' : 'Proceed to Payment'}
                 </Button>
                 <p className="text-center text-xs text-neutral-400">
-                  Demo Payment &mdash; no real money is charged. Card details are not saved.
+                  You will be redirected to ICICI's secure UAT payment page to enter your card details.
                 </p>
-              </form>
-            </motion.div>
-          )}
-
-          {view === 'success' && (
-            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg border border-success-100 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.10)] sm:p-8">
-              <div className="flex flex-col items-start gap-5 sm:flex-row">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-success-50 text-success-600">
-                  <CheckCircle2 size={26} aria-hidden="true" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight text-neutral-950 outline-none">
-                    Payment Successful
-                  </h1>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
-                    Thank you. Your demo payment has been recorded and our team has been notified to begin processing
-                    your request.
-                  </p>
-                  <p className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    Request Reference: <span className="text-neutral-900">{maskedReference}</span>
-                  </p>
-                  {notifyError && (
-                    <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-warning-100 bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-700">
-                      <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>Payment recorded, but we couldn't reach our notification service automatically. Please keep your reference number handy if you contact us.</span>
-                    </div>
-                  )}
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    <Button type="button" variant="secondary" size="lg" onClick={() => navigate('/')}>
-                      Back to Home
-                    </Button>
-                  </div>
-                </div>
               </div>
             </motion.div>
           )}
@@ -358,11 +174,14 @@ export function PaymentDemoPage() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight text-neutral-950 outline-none">
-                    Payment Failed
+                    Payment Could Not Be Started
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
-                    {failureReason || 'We could not process your demo payment.'} Your quote details are still saved, so you
+                    {failureReason || 'We could not process your payment.'} Your quote details are still saved, so you
                     can try again or ask the Kargar team to call you instead.
+                  </p>
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Request Reference: <span className="text-neutral-900">{maskedReference}</span>
                   </p>
                   <div className="mt-6 flex flex-wrap gap-3">
                     <Button type="button" variant="primary" size="lg" onClick={() => setView('form')}>

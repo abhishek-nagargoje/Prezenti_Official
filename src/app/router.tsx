@@ -13,7 +13,7 @@ import './routes/index'; // Initialize global route registry
 // Consume them directly here — wrapping them in a second lazy() call caused
 // React error #306 ("Lazy element type must resolve to a class or function.
 // Did you wrap a component in React.lazy() more than once?").
-import { ServicesHubPage, PrivacyPolicy, TermsAndConditions, AboutUs, TalkToUs, RefundPolicy, CancellationPolicy, PricingPage, PaymentDemoPage } from './lazyRouteComponents';
+import { ServicesHubPage, PrivacyPolicy, TermsAndConditions, AboutUs, TalkToUs, RefundPolicy, CancellationPolicy, PricingPage, PaymentDemoPage, PaymentResultPage } from './lazyRouteComponents';
 
 function withSuspense(element: ReactNode) {
   return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
@@ -36,6 +36,7 @@ export const router = createBrowserRouter([
       { path: '/pricing', element: withSuspense(<PricingPage />) },
       { path: '/talk-to-us', element: withSuspense(<TalkToUs />) },
       { path: '/payment-demo', element: withSuspense(<PaymentDemoPage />) },
+      { path: '/payment/result', element: withSuspense(<PaymentResultPage />) },
       { path: '/live-support', element: <Navigate to="/talk-to-us" replace /> },
       { path: '/receptionist-services', element: <Navigate to="/receptionist-staffing-services" replace /> },
       { path: '/compliance', element: <SectionRedirect sectionId="services" /> },

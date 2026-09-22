@@ -44,3 +44,10 @@ SITEWIDE_CLAIM_SAFETY_AUDIT.md
 
 # Scratch scripts
 rewrite.py
+scratch/
+
+# Claude Code local tooling/session state (not application code)
+.claude/
+.agents/
+.mcp.json
+skills-lock.json
