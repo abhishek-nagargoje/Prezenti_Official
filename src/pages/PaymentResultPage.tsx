@@ -88,6 +88,12 @@ function presentationForStatus(status: TransactionStatus, responseDescription?: 
   }
 }
 
+/** Bounded polling for a non-terminal (PENDING/INITIATED) status only — never indefinite, and only ever reads server-derived status, never guesses. */
+const POLL_INTERVAL_MS = 5_000;
+const MAX_POLL_ATTEMPTS = 12; // ~60s total
+
+const NON_TERMINAL_STATUSES: ReadonlySet<TransactionStatus> = new Set(['PENDING', 'INITIATED']);
+
 export function PaymentResultPage() {
   const [searchParams] = useSearchParams();
   const merchantTxnNo = searchParams.get('merchantTxnNo');
@@ -97,6 +103,8 @@ export function PaymentResultPage() {
   const [transaction, setTransaction] = useState<PaymentStatusResponse['transaction'] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pollingTimedOut, setPollingTimedOut] = useState(false);
+  const pollAttemptsRef = useRef(0);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -106,10 +114,10 @@ export function PaymentResultPage() {
     headingRef.current?.focus();
   }, [pageState]);
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (options: { silent?: boolean } = {}) => {
     if (!merchantTxnNo) return;
 
-    setIsRefreshing(true);
+    if (!options.silent) setIsRefreshing(true);
     try {
       const result = await getPaymentStatus(merchantTxnNo);
 
@@ -122,21 +130,48 @@ export function PaymentResultPage() {
       setTransaction(result.transaction);
       setPageState('result');
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "We couldn't retrieve your payment status. Please try again.",
-      );
-      setPageState('error');
+      // A silent background poll failing transiently shouldn't yank the
+      // user from a "still processing" view into a scary error screen —
+      // it'll simply retry on the next tick (bounded) or the user can
+      // refresh manually. A foreground (manual) fetch still surfaces it.
+      if (!options.silent) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "We couldn't retrieve your payment status. Please try again.",
+        );
+        setPageState('error');
+      }
     } finally {
-      setIsRefreshing(false);
+      if (!options.silent) setIsRefreshing(false);
     }
   }, [merchantTxnNo]);
 
   useEffect(() => {
     if (!merchantTxnNo) return;
+    pollAttemptsRef.current = 0;
+    setPollingTimedOut(false);
     void fetchStatus();
     // Only run on mount / when the reference changes — refresh is manual otherwise.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [merchantTxnNo]);
+
+  // Bounded polling while the transaction is still non-terminal (PENDING
+  // or INITIATED). Never treats the mere passage of time as success —
+  // each tick re-fetches the server-authoritative status and stops the
+  // moment it becomes terminal, or after MAX_POLL_ATTEMPTS regardless.
+  useEffect(() => {
+    if (pageState !== 'result' || !transaction || !NON_TERMINAL_STATUSES.has(transaction.status)) return;
+    if (pollAttemptsRef.current >= MAX_POLL_ATTEMPTS) {
+      setPollingTimedOut(true);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      pollAttemptsRef.current += 1;
+      void fetchStatus({ silent: true });
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pageState, transaction, fetchStatus]);
 
   return (
     <>
@@ -222,7 +257,11 @@ export function PaymentResultPage() {
                     <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight text-neutral-950 outline-none">
                       {presentation.heading}
                     </h1>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">{presentation.description}</p>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
+                      {NON_TERMINAL_STATUSES.has(transaction.status) && pollingTimedOut
+                        ? 'Payment status is still being confirmed. This is taking longer than usual — please check back in a few minutes, or contact us if it persists.'
+                        : presentation.description}
+                    </p>
 
                     <dl className="mt-4 grid gap-x-6 gap-y-2 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500 sm:grid-cols-2">
                       <div>

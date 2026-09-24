@@ -78,9 +78,10 @@ export function PaymentDemoPage() {
       });
 
       if (result.success && result.redirectURI) {
-        // The backend guarantees this is a validated HTTPS URL on the
-        // correct ICICI UAT host with tranCtx appended — hand off with a
-        // plain top-level navigation, no client-side rewriting.
+        // The backend guarantees this is a validated HTTPS URL on a
+        // confirmed ICICI host (server-selected based on the configured
+        // environment) with tranCtx appended — hand off with a plain
+        // top-level navigation, no client-side rewriting.
         window.location.href = result.redirectURI;
         return;
       }
@@ -101,14 +102,14 @@ export function PaymentDemoPage() {
     <>
       <SEO
         title="Payment | Kargar"
-        description="Complete your Kargar service payment securely via ICICI's UAT test payment gateway."
+        description="Complete your Kargar service payment securely via ICICI Bank's payment gateway."
         canonicalUrl="/payment-demo"
       />
       <main className="bg-canvas pt-24 pb-14 sm:pt-28 lg:pb-20">
         <section className="mx-auto max-w-3xl px-4 sm:px-6">
-          <div className="mb-5 flex items-center justify-center gap-2 rounded-full border border-warning-200 bg-warning-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-warning-700">
+          <div className="mb-5 flex items-center justify-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-700">
             <ShieldAlert size={14} aria-hidden="true" />
-            UAT Test Mode &mdash; Connecting to ICICI's Secure Payment Page
+            Secure Payment via ICICI Bank
           </div>
 
           {view === 'callback' && (
@@ -160,7 +161,7 @@ export function PaymentDemoPage() {
                   {view === 'processing' ? 'Connecting to payment gateway' : 'Proceed to Payment'}
                 </Button>
                 <p className="text-center text-xs text-neutral-400">
-                  You will be redirected to ICICI's secure UAT payment page to enter your card details.
+                  You will be redirected to ICICI Bank's secure payment page to enter your card details.
                 </p>
               </div>
             </motion.div>

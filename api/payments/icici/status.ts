@@ -22,7 +22,26 @@ import { getIciciConfig } from '../../_lib/payments/icici/env.js';
 import {
   createSupabaseClientFromEnv,
   createSupabasePaymentTransactionRepository,
+  type PublicPaymentTransactionStatus,
 } from '../../_lib/payments/icici/repository.js';
+
+/**
+ * Strict response allow-list, enforced at this route itself (not just by
+ * trusting the repository's own SQL `select()`) — a second, independent
+ * layer, so a future repository change can never widen what this
+ * endpoint exposes without an explicit change here too.
+ */
+function toSafeResponse(transaction: PublicPaymentTransactionStatus) {
+  return {
+    merchantTxnNo: transaction.merchantTxnNo,
+    status: transaction.status,
+    amount: transaction.amount,
+    currency: transaction.currency,
+    responseDescription: transaction.responseDescription,
+    paymentMode: transaction.paymentMode,
+    paymentDatetime: transaction.paymentDatetime,
+  };
+}
 
 interface ApiRequest {
   method?: string;
@@ -84,9 +103,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   }
 
   try {
-    // Confirms UAT-only configuration is present; the status lookup
-    // itself never calls ICICI, but this keeps the same fail-closed
-    // posture as the initiate route.
+    // Confirms ICICI configuration (whichever environment is active) is
+    // present; the status lookup itself never calls ICICI, but this keeps
+    // the same fail-closed posture as the initiate route.
     getIciciConfig();
 
     const client = createSupabaseClientFromEnv();
@@ -98,7 +117,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       return response.status(404).json({ success: false, message: 'Transaction not found.' });
     }
 
-    return response.status(200).json({ success: true, transaction: result });
+    return response.status(200).json({ success: true, transaction: toSafeResponse(result) });
   } catch (error) {
     console.error('[ICICI STATUS ERROR]', error instanceof Error ? error.message : error);
     return response.status(503).json({ success: false, message: 'Unable to retrieve payment status right now.' });

@@ -156,10 +156,65 @@ describe('POST /api/payments/icici/return', () => {
     expect(mockRecordCallback).toHaveBeenCalledWith(expect.objectContaining({ status: 'UNKNOWN' }));
   });
 
+  it('rejects (UNKNOWN) a hash-VALID callback whose aggregatorID does not match our configured aggregator ID', async () => {
+    const { response } = createResponse();
+    const body = bodyWithValidHash({ ...VALID_FIELDS, aggregatorID: 'someone-elses-aggregator-id' });
+
+    await handler({ method: 'POST', headers: {}, body }, response as never);
+
+    expect(mockRecordCallback).toHaveBeenCalledWith(expect.objectContaining({ status: 'UNKNOWN' }));
+  });
+
+  it('never marks SUCCESS or attempts hash verification when secureHash itself is missing entirely', async () => {
+    const { response } = createResponse();
+    const { secureHash: _drop, ...withoutHash } = bodyWithValidHash(VALID_FIELDS);
+    void _drop;
+
+    await handler({ method: 'POST', headers: {}, body: withoutHash }, response as never);
+
+    // Rejected by shape validation before hash verification is even
+    // attempted — recordCallback (and therefore any status, including
+    // SUCCESS) is never reached.
+    expect(mockRecordCallback).not.toHaveBeenCalled();
+  });
+
+  it('maps a verified non-success responseCode to FAILED, never SUCCESS', async () => {
+    const { response } = createResponse();
+    const body = bodyWithValidHash({ ...VALID_FIELDS, responseCode: '9999' });
+
+    await handler({ method: 'POST', headers: {}, body }, response as never);
+
+    expect(mockRecordCallback).toHaveBeenCalledWith(expect.objectContaining({ status: 'FAILED' }));
+  });
+
+  it('maps a verified R1000 (out-of-band, e.g. UPI) responseCode to PENDING, never SUCCESS', async () => {
+    const { response } = createResponse();
+    const body = bodyWithValidHash({ ...VALID_FIELDS, responseCode: 'R1000' });
+
+    await handler({ method: 'POST', headers: {}, body }, response as never);
+
+    expect(mockRecordCallback).toHaveBeenCalledWith(expect.objectContaining({ status: 'PENDING' }));
+  });
+
   it('never downgrades an already-SUCCESS local transaction, even if a later hash-valid callback reports failure (stale-callback protection)', async () => {
     mockGetPublicStatusByMerchantTxnNo.mockResolvedValueOnce({ ...MATCHING_LOCAL_TRANSACTION, status: 'SUCCESS' });
     const { response } = createResponse();
     const body = bodyWithValidHash({ ...VALID_FIELDS, responseCode: '9999' }); // a stale/replayed failure
+
+    await handler({ method: 'POST', headers: {}, body }, response as never);
+
+    expect(mockRecordCallback).toHaveBeenCalledWith(expect.objectContaining({ status: 'SUCCESS' }));
+  });
+
+  it('never downgrades an already-SUCCESS local transaction even when the callback fails hash verification entirely (forged/corrupted request protection)', async () => {
+    // This is the more dangerous case than the one above: an attacker or a
+    // corrupted-in-transit request that never verifies at all, but still
+    // happens to carry a real merchantTxnNo. The secureHash check alone
+    // cannot protect against this — the never-downgrade-SUCCESS guard must
+    // run for every outcome, not just the hash-VERIFIED branch.
+    mockGetPublicStatusByMerchantTxnNo.mockResolvedValueOnce({ ...MATCHING_LOCAL_TRANSACTION, status: 'SUCCESS' });
+    const { response } = createResponse();
+    const body = { ...bodyWithValidHash(VALID_FIELDS), respDescription: 'TAMPERED-AFTER-HASHING' };
 
     await handler({ method: 'POST', headers: {}, body }, response as never);
 

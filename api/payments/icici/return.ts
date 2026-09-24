@@ -162,10 +162,22 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const repository = createSupabasePaymentTransactionRepository(client);
 
     if (result.merchantTxnNo) {
-      // Only a hash-VERIFIED payload is even eligible for correlation —
-      // an unverified one is already UNKNOWN and stays that way.
-      if (result.outcome === 'VERIFIED') {
-        const local = await repository.getPublicStatusByMerchantTxnNo(result.merchantTxnNo);
+      // Fetch the local transaction regardless of verification outcome —
+      // a transaction Prezenti has already confirmed SUCCESS must never
+      // be downgraded, not even by a hash-mismatched or malformed
+      // callback that happens to carry a real merchantTxnNo (a forged or
+      // replayed request, or simple corruption in transit). This check
+      // must NOT be gated on `result.outcome === 'VERIFIED'` — an
+      // unverified callback still reaches this line and must not be
+      // allowed to overwrite an already-settled SUCCESS with UNKNOWN.
+      const local = await repository.getPublicStatusByMerchantTxnNo(result.merchantTxnNo);
+
+      if (local?.status === 'SUCCESS') {
+        finalStatus = 'SUCCESS';
+      } else if (result.outcome === 'VERIFIED') {
+        // Only a hash-VERIFIED payload is eligible for full correlation
+        // (merchantId/aggregatorID/amount cross-check) — an unverified
+        // one is already UNKNOWN and stays that way.
         finalStatus = correlateWithLocalTransaction(payload, result.status, local, {
           merchantId: configMerchantId,
           aggregatorId: configAggregatorId,
